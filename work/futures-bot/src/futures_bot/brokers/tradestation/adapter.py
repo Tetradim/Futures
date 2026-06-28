@@ -9,6 +9,8 @@ from typing import Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from futures_bot.application.margin_estimates import MarginEstimateUnavailable
+from futures_bot.application.rebalance_risk_context import MarginEstimate
 from futures_bot.brokers.tradestation.config import TradeStationConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
@@ -159,6 +161,19 @@ class TradeStationBroker:
         except ValueError as exc:
             raise BrokerSubmissionError(str(exc)) from exc
 
+    def estimate_order_margin(self, order: BrokerOrder) -> MarginEstimate:
+        try:
+            payload = self._request(
+                "POST",
+                "/orderexecution/orderconfirm",
+                self._order_payload(order),
+            )
+            return _margin_estimate(payload)
+        except TradeStationHttpError as exc:
+            raise MarginEstimateUnavailable(exc.reason, exc.broker_error_code) from exc
+        except ValueError as exc:
+            raise MarginEstimateUnavailable(str(exc)) from exc
+
     def cancel_order(self, broker_order_id: str) -> None:
         if not broker_order_id:
             raise ValueError("broker_order_id is required")
@@ -297,6 +312,29 @@ def _order_id(payload: Mapping[str, object]) -> str | None:
     if isinstance(orders, list) and orders:
         return _optional_text(orders[0], "OrderID")
     return None
+
+
+def _margin_estimate(payload: Mapping[str, object]) -> MarginEstimate:
+    initial_margin = _decimal(
+        payload,
+        "InitialMargin",
+        "InitialMarginRequirement",
+        default=None,
+    )
+    maintenance_margin = _decimal(
+        payload,
+        "MaintenanceMargin",
+        "MaintenanceMarginRequirement",
+        default=None,
+    )
+    if initial_margin is None or maintenance_margin is None:
+        raise ValueError(
+            "TradeStation order confirmation did not include InitialMargin or MaintenanceMargin"
+        )
+    return MarginEstimate(
+        initial_margin=initial_margin,
+        maintenance_margin=maintenance_margin,
+    )
 
 
 def _tradestation_order_type(order_type: OrderType) -> str:

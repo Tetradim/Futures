@@ -212,6 +212,8 @@ Order margin inputs can be requested through `futures_bot.application.margin_est
 
 The IBKR adapter implements the margin estimate provider boundary through a what-if order preview. It builds the same futures contract and order payload used for submission, sets `whatIf` and `transmit`, parses IBKR initial and maintenance margin changes, and maps preview failures to `MarginEstimateUnavailable`.
 
+The TradeStation adapter implements the same margin estimate provider boundary through the v3 order confirmation endpoint. It reuses the live order payload, parses explicit initial and maintenance margin fields when the confirmation response provides them, and raises `MarginEstimateUnavailable` if TradeStation returns only non-margin estimate fields or rejects the confirmation request.
+
 Approved order intents can be submitted through `futures_bot.application.order_submission.OrderSubmissionService`. It always runs the audited risk check first, blocks rejected orders before the broker port is called, converts approved intents into `BrokerOrder` values, submits them through the configured broker adapter, and audits blocked, submitted, and broker-rejected handoffs. Configure it with a lifecycle store to persist working and rejected lifecycle states as soon as the submission decision is known.
 
 Broker adapters should raise `futures_bot.ports.broker.BrokerSubmissionError` when the broker, exchange, or route rejects a submitted order synchronously. The submission service records a rejected lifecycle with the broker reason and optional broker error code instead of leaving the order in an ambiguous pending state.

@@ -6,6 +6,8 @@ from typing import Mapping
 
 import pytest
 
+from futures_bot.application.margin_estimates import MarginEstimateUnavailable
+from futures_bot.application.rebalance_risk_context import MarginEstimate
 from futures_bot.brokers.tradestation.config import BrokerEnvironment, TradeStationConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
@@ -235,6 +237,89 @@ def test_tradestation_submit_order_maps_http_errors_to_submission_error():
 
     assert exc_info.value.reason == "order rejected: market closed"
     assert exc_info.value.broker_error_code == "MarketClosed"
+
+
+def test_tradestation_adapter_estimates_order_margin_from_order_confirmation():
+    transport = RecordingTransport(
+        (
+            {
+                "InitialMargin": "12000.25",
+                "MaintenanceMargin": "9000.75",
+            },
+        )
+    )
+    broker = _adapter(transport)
+
+    estimate = broker.estimate_order_margin(
+        BrokerOrder(
+            instrument_id="@ESU26",
+            side=OrderSide.BUY,
+            quantity=2,
+            order_type=OrderType.LIMIT,
+            limit_price=Decimal("5000.25"),
+            client_order_id="client-1",
+        )
+    )
+
+    assert estimate == MarginEstimate(
+        initial_margin=Decimal("12000.25"),
+        maintenance_margin=Decimal("9000.75"),
+    )
+    assert transport.requests == [
+        {
+            "method": "POST",
+            "url": "https://sim-api.tradestation.com/v3/orderexecution/orderconfirm",
+            "headers": {"Authorization": "Bearer token-123", "Content-Type": "application/json"},
+            "body": {
+                "AccountID": "SIM12345",
+                "LimitPrice": "5000.25",
+                "OrderType": "Limit",
+                "Quantity": "2",
+                "Symbol": "@ESU26",
+                "TimeInForce": {"Duration": "DAY"},
+                "TradeAction": "BUY",
+            },
+        }
+    ]
+
+
+def test_tradestation_adapter_fails_closed_when_confirmation_has_no_margin_fields():
+    transport = RecordingTransport(({"EstimatedCost": "250000.00"},))
+    broker = _adapter(transport)
+
+    with pytest.raises(MarginEstimateUnavailable) as exc_info:
+        broker.estimate_order_margin(
+            BrokerOrder(
+                instrument_id="@ESU26",
+                side=OrderSide.BUY,
+                quantity=1,
+                order_type=OrderType.MARKET,
+                client_order_id="client-2",
+            )
+        )
+
+    assert exc_info.value.reason == (
+        "TradeStation order confirmation did not include InitialMargin or MaintenanceMargin"
+    )
+
+
+def test_tradestation_adapter_maps_margin_confirmation_http_errors():
+    transport = FailingTransport("order confirmation failed", 400, "InvalidOrder")
+    broker = _adapter(transport)
+
+    with pytest.raises(MarginEstimateUnavailable) as exc_info:
+        broker.estimate_order_margin(
+            BrokerOrder(
+                instrument_id="@ESU26",
+                side=OrderSide.SELL,
+                quantity=1,
+                order_type=OrderType.MARKET,
+                client_order_id="client-3",
+            )
+        )
+
+    assert exc_info.value.reason == "order confirmation failed"
+    assert exc_info.value.broker_error_code == "InvalidOrder"
 
 
 def test_tradestation_cancel_order_uses_delete_endpoint():
