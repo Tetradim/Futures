@@ -19,24 +19,40 @@ class OrderActivityLookupPort(Protocol):
         """Return persisted broker-accepted order activity by client order ID."""
 
 
+class OrderLifecycleStorePort(Protocol):
+    def load(self, client_order_id: str) -> OrderLifecycle | None:
+        """Load the latest persisted order lifecycle by client order ID."""
+
+    def save(self, lifecycle: OrderLifecycle) -> None:
+        """Persist the latest known order lifecycle."""
+
+
 class OrderUpdateService:
     def __init__(
         self,
         audit_log: AuditLogPort,
         position_ledger: PositionLedgerPort | None = None,
         order_activity: OrderActivityLookupPort | None = None,
+        lifecycle_store: OrderLifecycleStorePort | None = None,
     ) -> None:
         self._audit_log = audit_log
         self._position_ledger = position_ledger
         self._order_activity = order_activity
+        self._lifecycle_store = lifecycle_store
 
     def apply(
         self,
-        lifecycle: OrderLifecycle,
+        lifecycle: OrderLifecycle | None,
         update: BrokerOrderUpdate,
         order_quantity: int | None = None,
         order_side: OrderSide | None = None,
     ) -> OrderLifecycle:
+        if lifecycle is None:
+            if self._lifecycle_store is None:
+                raise ValueError("order lifecycle is required when lifecycle store is not configured")
+            lifecycle = self._lifecycle_store.load(update.client_order_id)
+            if lifecycle is None:
+                raise ValueError("order lifecycle was not found")
         if update.client_order_id != lifecycle.client_order_id:
             raise ValueError("broker update client_order_id does not match lifecycle")
 
@@ -91,6 +107,8 @@ class OrderUpdateService:
                 "broker_error_code": update.broker_error_code,
             }
         )
+        if self._lifecycle_store is not None:
+            self._lifecycle_store.save(updated)
         if self._position_ledger is not None and update.update_type == BrokerOrderUpdateType.FILL:
             assert resolved_order_side is not None
             self._position_ledger.apply_fill(update, resolved_order_side)

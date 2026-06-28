@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 
 from futures_bot.application.order_activity import OrderActivityTracker
 from futures_bot.application.risk_check import RiskCheckService
@@ -18,6 +19,14 @@ class OrderSubmissionResult:
     broker_order_id: str | None
 
 
+class OrderLifecycleStorePort(Protocol):
+    def load(self, client_order_id: str) -> OrderLifecycle | None:
+        """Load the latest persisted lifecycle for a client order ID."""
+
+    def save(self, lifecycle: OrderLifecycle) -> None:
+        """Persist the latest known order lifecycle."""
+
+
 class OrderSubmissionService:
     def __init__(
         self,
@@ -25,11 +34,13 @@ class OrderSubmissionService:
         broker: BrokerPort,
         audit_log: AuditLogPort,
         activity_tracker: OrderActivityTracker | None = None,
+        lifecycle_store: OrderLifecycleStorePort | None = None,
     ) -> None:
         self._risk_check = risk_check
         self._broker = broker
         self._audit_log = audit_log
         self._activity_tracker = activity_tracker
+        self._lifecycle_store = lifecycle_store
 
     def submit(self, intent: OrderIntent, context: RiskContext) -> OrderSubmissionResult:
         risk_decision = self._risk_check.check(intent, context)
@@ -37,6 +48,7 @@ class OrderSubmissionService:
 
         if not risk_decision.approved:
             rejected = lifecycle.mark_rejected(risk_decision.detail)
+            self._save_lifecycle(rejected)
             self._audit_log.append(
                 {
                     "type": "order_submission_blocked",
@@ -60,6 +72,7 @@ class OrderSubmissionService:
             broker_order_id = self._broker.submit_order(broker_order)
         except BrokerSubmissionError as exc:
             rejected = lifecycle.mark_rejected(exc.reason)
+            self._save_lifecycle(rejected)
             self._audit_log.append(
                 {
                     "type": "order_submission_failed",
@@ -80,6 +93,7 @@ class OrderSubmissionService:
             )
 
         working = lifecycle.mark_working()
+        self._save_lifecycle(working)
         self._audit_log.append(
             {
                 "type": "order_submitted",
@@ -102,3 +116,7 @@ class OrderSubmissionService:
             lifecycle=working,
             broker_order_id=broker_order_id,
         )
+
+    def _save_lifecycle(self, lifecycle: OrderLifecycle) -> None:
+        if self._lifecycle_store is not None:
+            self._lifecycle_store.save(lifecycle)

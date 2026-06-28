@@ -49,6 +49,17 @@ class RejectingBroker(RecordingBroker):
         )
 
 
+class RecordingLifecycleStore:
+    def __init__(self) -> None:
+        self.saved_lifecycles = []
+
+    def load(self, client_order_id: str):
+        raise NotImplementedError
+
+    def save(self, lifecycle) -> None:
+        self.saved_lifecycles.append(lifecycle)
+
+
 def _instrument() -> FuturesInstrument:
     return FuturesInstrument(
         instrument_id="ES-202609-CME",
@@ -177,6 +188,23 @@ def test_order_submission_records_successful_submission_activity_when_tracker_is
     assert activity.recent_order_timestamps == (NOW,)
 
 
+def test_order_submission_persists_successful_lifecycle_when_store_is_configured():
+    audit_log = InMemoryAuditLog()
+    lifecycle_store = RecordingLifecycleStore()
+    broker = RecordingBroker()
+    service = OrderSubmissionService(
+        risk_check=RiskCheckService(RiskEngine(_limits()), audit_log),
+        broker=broker,
+        audit_log=audit_log,
+        lifecycle_store=lifecycle_store,
+    )
+
+    result = service.submit(_intent(), _context())
+
+    assert lifecycle_store.saved_lifecycles == [result.lifecycle]
+    assert lifecycle_store.saved_lifecycles[0].status == OrderLifecycleStatus.WORKING
+
+
 def test_order_submission_blocks_rejected_order_before_broker_handoff():
     audit_log = InMemoryAuditLog()
     broker = RecordingBroker()
@@ -208,6 +236,26 @@ def test_order_submission_blocks_rejected_order_before_broker_handoff():
     }
 
 
+def test_order_submission_persists_rejected_lifecycle_when_risk_blocks_order():
+    audit_log = InMemoryAuditLog()
+    lifecycle_store = RecordingLifecycleStore()
+    broker = RecordingBroker()
+    service = OrderSubmissionService(
+        risk_check=RiskCheckService(RiskEngine(_limits()), audit_log),
+        broker=broker,
+        audit_log=audit_log,
+        lifecycle_store=lifecycle_store,
+    )
+
+    result = service.submit(
+        _intent(),
+        replace(_context(), used_client_order_ids=frozenset({"order-1"})),
+    )
+
+    assert lifecycle_store.saved_lifecycles == [result.lifecycle]
+    assert lifecycle_store.saved_lifecycles[0].status == OrderLifecycleStatus.REJECTED
+
+
 def test_order_submission_marks_lifecycle_rejected_when_broker_submission_fails():
     audit_log = InMemoryAuditLog()
     broker = RejectingBroker()
@@ -235,3 +283,20 @@ def test_order_submission_marks_lifecycle_rejected_when_broker_submission_fails(
         "detail": "exchange rejected order: price band exceeded",
         "broker_error_code": "PRICE_BAND",
     }
+
+
+def test_order_submission_persists_rejected_lifecycle_when_broker_submission_fails():
+    audit_log = InMemoryAuditLog()
+    lifecycle_store = RecordingLifecycleStore()
+    broker = RejectingBroker()
+    service = OrderSubmissionService(
+        risk_check=RiskCheckService(RiskEngine(_limits()), audit_log),
+        broker=broker,
+        audit_log=audit_log,
+        lifecycle_store=lifecycle_store,
+    )
+
+    result = service.submit(_intent(), _context())
+
+    assert lifecycle_store.saved_lifecycles == [result.lifecycle]
+    assert lifecycle_store.saved_lifecycles[0].status == OrderLifecycleStatus.REJECTED
