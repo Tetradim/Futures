@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from futures_bot.domain.order_lifecycle import OrderLifecycle
 from futures_bot.ports.audit import AuditLogPort
@@ -35,16 +36,36 @@ class OrderCancellationResult:
     broker_error_code: str | None = None
 
 
+class OrderLifecycleStorePort(Protocol):
+    def load(self, client_order_id: str) -> OrderLifecycle | None:
+        """Load the latest persisted lifecycle for a client order ID."""
+
+    def save(self, lifecycle: OrderLifecycle) -> None:
+        """Persist the latest known order lifecycle."""
+
+
 class OrderCancellationService:
-    def __init__(self, broker: BrokerPort, audit_log: AuditLogPort) -> None:
+    def __init__(
+        self,
+        broker: BrokerPort,
+        audit_log: AuditLogPort,
+        lifecycle_store: OrderLifecycleStorePort | None = None,
+    ) -> None:
         self._broker = broker
         self._audit_log = audit_log
+        self._lifecycle_store = lifecycle_store
 
     def request_cancel(
         self,
-        lifecycle: OrderLifecycle,
+        lifecycle: OrderLifecycle | None,
         request: OrderCancellationRequest,
     ) -> OrderCancellationResult:
+        if lifecycle is None:
+            if self._lifecycle_store is None:
+                raise ValueError("order lifecycle is required when lifecycle store is not configured")
+            lifecycle = self._lifecycle_store.load(request.client_order_id)
+            if lifecycle is None:
+                raise ValueError("order lifecycle was not found")
         if request.client_order_id != lifecycle.client_order_id:
             raise ValueError("cancel request client_order_id does not match lifecycle")
 
@@ -73,6 +94,8 @@ class OrderCancellationService:
                 broker_error_code=exc.broker_error_code,
             )
 
+        if self._lifecycle_store is not None:
+            self._lifecycle_store.save(pending_cancel)
         self._audit_log.append(
             {
                 "type": "order_cancel_requested",
