@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_FLOOR
-from typing import Mapping
+from typing import Mapping, Protocol
 
-from futures_bot.strategies.trend_following import TrendSignal
+
+class StrategySignal(Protocol):
+    instrument_id: str
+    score: Decimal
 
 
 @dataclass(frozen=True)
@@ -35,7 +38,7 @@ class PositionTarget:
 
 
 def calculate_volatility_target_position(
-    signal: TrendSignal,
+    signal: StrategySignal,
     account_equity: Decimal,
     dollar_volatility_per_contract: Decimal,
     config: PositionSizingConfig,
