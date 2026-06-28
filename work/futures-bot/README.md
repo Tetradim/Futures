@@ -212,6 +212,8 @@ Order margin inputs can be requested through `futures_bot.application.margin_est
 
 When a broker route does not expose an order preview, `futures_bot.application.margin_schedules.MarginScheduleProvider` can serve as the approved margin provider from operator-supplied FCM or exchange margin schedules. Each schedule entry must include an instrument ID, positive per-contract initial and maintenance margins, a source label, and a timezone-aware expiry; missing, mismatched, or stale entries raise `MarginEstimateUnavailable`.
 
+Operator-supplied margin schedules can be loaded and saved with `futures_bot.storage.margin_schedules.JsonMarginScheduleStore`. It stores one JSON array of instrument schedules with Decimal values encoded as strings and ISO timezone-aware expiry timestamps, rejects missing files, malformed records, and duplicate instruments, and can feed `MarginScheduleProvider` after loading.
+
 The IBKR adapter implements the margin estimate provider boundary through a what-if order preview. It builds the same futures contract and order payload used for submission, sets `whatIf` and `transmit`, parses IBKR initial and maintenance margin changes, and maps preview failures to `MarginEstimateUnavailable`.
 
 The TradeStation adapter implements the same margin estimate provider boundary through the v3 order confirmation endpoint. It reuses the live order payload, parses explicit initial and maintenance margin fields when the confirmation response provides them, and raises `MarginEstimateUnavailable` if TradeStation returns only non-margin estimate fields or rejects the confirmation request.
