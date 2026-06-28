@@ -24,6 +24,7 @@ class RiskReason(StrEnum):
     MARKET_NOT_TWO_SIDED = "market_not_two_sided"
     CROSSED_MARKET = "crossed_market"
     WIDE_BID_ASK_SPREAD = "wide_bid_ask_spread"
+    ORDER_RATE_LIMIT = "order_rate_limit"
     MAX_ORDER_QUANTITY = "max_order_quantity"
     MAX_ORDER_NOTIONAL = "max_order_notional"
     MAX_POSITION = "max_position"

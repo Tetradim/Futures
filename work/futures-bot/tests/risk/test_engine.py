@@ -57,6 +57,8 @@ def _limits() -> RiskLimits:
         max_order_notional=Decimal("1000000"),
         max_position_notional=Decimal("2000000"),
         max_bid_ask_spread_percent=Decimal("0.001"),
+        max_orders_per_window=3,
+        order_rate_window=timedelta(seconds=10),
         account_stale_after=timedelta(seconds=30),
         market_data_stale_after=timedelta(seconds=10),
         price_collar_percent=Decimal("0.05"),
@@ -90,6 +92,7 @@ def _context(**overrides) -> RiskContext:
         used_client_order_ids=frozenset(),
         estimated_order_initial_margin=Decimal("5000"),
         realized_pnl_today=Decimal("0"),
+        recent_order_timestamps=(),
         kill_switch_active=False,
         positions_reconciled=True,
     )
@@ -188,6 +191,39 @@ def test_risk_engine_rejects_max_daily_loss_breach():
 
     assert decision.approved is False
     assert decision.reason == RiskReason.MAX_DAILY_LOSS
+
+
+def test_risk_engine_rejects_order_rate_limit_breach():
+    decision = RiskEngine(_limits()).evaluate(
+        _intent(),
+        _context(
+            recent_order_timestamps=(
+                NOW - timedelta(seconds=1),
+                NOW - timedelta(seconds=4),
+                NOW - timedelta(seconds=9),
+            )
+        ),
+    )
+
+    assert decision.approved is False
+    assert decision.reason == RiskReason.ORDER_RATE_LIMIT
+    assert decision.detail == "order rate limit reached"
+
+
+def test_risk_engine_ignores_recent_order_timestamps_outside_rate_window():
+    decision = RiskEngine(_limits()).evaluate(
+        _intent(),
+        _context(
+            recent_order_timestamps=(
+                NOW - timedelta(seconds=2),
+                NOW - timedelta(seconds=4),
+                NOW - timedelta(seconds=11),
+            )
+        ),
+    )
+
+    assert decision.approved is True
+    assert decision.reason is None
 
 
 def test_risk_engine_rejects_market_without_two_sided_quote():
@@ -296,6 +332,8 @@ def test_risk_limits_rejects_non_positive_max_daily_loss():
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("2000000"),
             max_bid_ask_spread_percent=Decimal("0.001"),
+            max_orders_per_window=3,
+            order_rate_window=timedelta(seconds=10),
             account_stale_after=timedelta(seconds=30),
             market_data_stale_after=timedelta(seconds=10),
             price_collar_percent=Decimal("0.05"),
@@ -316,6 +354,8 @@ def test_risk_limits_rejects_non_positive_max_bid_ask_spread_percent():
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("2000000"),
             max_bid_ask_spread_percent=Decimal("0"),
+            max_orders_per_window=3,
+            order_rate_window=timedelta(seconds=10),
             account_stale_after=timedelta(seconds=30),
             market_data_stale_after=timedelta(seconds=10),
             price_collar_percent=Decimal("0.05"),
@@ -336,6 +376,8 @@ def test_risk_limits_rejects_non_positive_max_order_notional():
             max_order_notional=Decimal("0"),
             max_position_notional=Decimal("2000000"),
             max_bid_ask_spread_percent=Decimal("0.001"),
+            max_orders_per_window=3,
+            order_rate_window=timedelta(seconds=10),
             account_stale_after=timedelta(seconds=30),
             market_data_stale_after=timedelta(seconds=10),
             price_collar_percent=Decimal("0.05"),
@@ -356,6 +398,8 @@ def test_risk_limits_rejects_non_positive_max_position_notional():
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("0"),
             max_bid_ask_spread_percent=Decimal("0.001"),
+            max_orders_per_window=3,
+            order_rate_window=timedelta(seconds=10),
             account_stale_after=timedelta(seconds=30),
             market_data_stale_after=timedelta(seconds=10),
             price_collar_percent=Decimal("0.05"),
@@ -364,3 +408,47 @@ def test_risk_limits_rejects_non_positive_max_position_notional():
         assert str(exc) == "max_position_notional must be positive"
     else:
         raise AssertionError("expected non-positive max_position_notional to be rejected")
+
+
+def test_risk_limits_rejects_non_positive_max_orders_per_window():
+    try:
+        RiskLimits(
+            max_order_quantity=5,
+            max_position_abs=10,
+            max_margin_usage=Decimal("0.50"),
+            max_daily_loss=Decimal("2500"),
+            max_order_notional=Decimal("1000000"),
+            max_position_notional=Decimal("2000000"),
+            max_bid_ask_spread_percent=Decimal("0.001"),
+            max_orders_per_window=0,
+            order_rate_window=timedelta(seconds=10),
+            account_stale_after=timedelta(seconds=30),
+            market_data_stale_after=timedelta(seconds=10),
+            price_collar_percent=Decimal("0.05"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "max_orders_per_window must be positive"
+    else:
+        raise AssertionError("expected non-positive max_orders_per_window to be rejected")
+
+
+def test_risk_limits_rejects_non_positive_order_rate_window():
+    try:
+        RiskLimits(
+            max_order_quantity=5,
+            max_position_abs=10,
+            max_margin_usage=Decimal("0.50"),
+            max_daily_loss=Decimal("2500"),
+            max_order_notional=Decimal("1000000"),
+            max_position_notional=Decimal("2000000"),
+            max_bid_ask_spread_percent=Decimal("0.001"),
+            max_orders_per_window=3,
+            order_rate_window=timedelta(0),
+            account_stale_after=timedelta(seconds=30),
+            market_data_stale_after=timedelta(seconds=10),
+            price_collar_percent=Decimal("0.05"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "order_rate_window must be positive"
+    else:
+        raise AssertionError("expected non-positive order_rate_window to be rejected")

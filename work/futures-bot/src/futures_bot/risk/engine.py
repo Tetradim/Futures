@@ -19,6 +19,8 @@ class RiskLimits:
     max_order_notional: Decimal
     max_position_notional: Decimal
     max_bid_ask_spread_percent: Decimal
+    max_orders_per_window: int
+    order_rate_window: timedelta
     account_stale_after: timedelta
     market_data_stale_after: timedelta
     price_collar_percent: Decimal
@@ -38,6 +40,10 @@ class RiskLimits:
             raise ValueError("max_position_notional must be positive")
         if self.max_bid_ask_spread_percent <= 0:
             raise ValueError("max_bid_ask_spread_percent must be positive")
+        if self.max_orders_per_window <= 0:
+            raise ValueError("max_orders_per_window must be positive")
+        if self.order_rate_window <= timedelta(0):
+            raise ValueError("order_rate_window must be positive")
         if self.account_stale_after <= timedelta(0):
             raise ValueError("account_stale_after must be positive")
         if self.market_data_stale_after <= timedelta(0):
@@ -56,6 +62,7 @@ class RiskContext:
     used_client_order_ids: frozenset[str]
     estimated_order_initial_margin: Decimal
     realized_pnl_today: Decimal
+    recent_order_timestamps: tuple[datetime, ...]
     kill_switch_active: bool
     positions_reconciled: bool
 
@@ -101,6 +108,10 @@ class RiskEngine:
 
         if context.realized_pnl_today <= -self._limits.max_daily_loss:
             return RiskDecision.reject(RiskReason.MAX_DAILY_LOSS, "realized daily loss limit reached")
+
+        recent_order_count = self._recent_order_count(context)
+        if recent_order_count >= self._limits.max_orders_per_window:
+            return RiskDecision.reject(RiskReason.ORDER_RATE_LIMIT, "order rate limit reached")
 
         quote_decision = self._evaluate_quote(context.market)
         if not quote_decision.approved:
@@ -153,6 +164,13 @@ class RiskEngine:
 
     def _notional(self, quantity: int, price: Decimal, instrument: FuturesInstrument) -> Decimal:
         return Decimal(quantity) * price * instrument.spec.multiplier
+
+    def _recent_order_count(self, context: RiskContext) -> int:
+        return sum(
+            1
+            for timestamp in context.recent_order_timestamps
+            if context.now - timestamp <= self._limits.order_rate_window
+        )
 
     def _evaluate_quote(self, market: MarketSnapshot) -> RiskDecision:
         if market.bid is None or market.ask is None:
