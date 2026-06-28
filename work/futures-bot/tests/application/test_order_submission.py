@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from futures_bot.application.order_activity import OrderActivityTracker
 from futures_bot.application.order_submission import OrderSubmissionService
 from futures_bot.application.risk_check import RiskCheckService
 from futures_bot.domain.enums import OrderSide, OrderType, SettlementType
@@ -155,6 +156,25 @@ def test_order_submission_submits_approved_order_and_audits_broker_handoff():
         "instrument_id": "ES-202609-CME",
         "status": "working",
     }
+
+
+def test_order_submission_records_successful_submission_activity_when_tracker_is_configured():
+    audit_log = InMemoryAuditLog()
+    activity_tracker = OrderActivityTracker(audit_log)
+    broker = RecordingBroker()
+    service = OrderSubmissionService(
+        risk_check=RiskCheckService(RiskEngine(_limits()), audit_log),
+        broker=broker,
+        audit_log=audit_log,
+        activity_tracker=activity_tracker,
+    )
+
+    result = service.submit(_intent(), _context())
+    activity = activity_tracker.snapshot(now=NOW, recent_order_window=timedelta(minutes=1))
+
+    assert result.broker_order_id == "broker-123"
+    assert activity.used_client_order_ids == frozenset({"order-1"})
+    assert activity.recent_order_timestamps == (NOW,)
 
 
 def test_order_submission_blocks_rejected_order_before_broker_handoff():

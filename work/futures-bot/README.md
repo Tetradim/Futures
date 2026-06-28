@@ -144,6 +144,8 @@ Market data adapters can provide quotes through `futures_bot.ports.market_data.M
 
 Readiness-gated order entry should flow through `futures_bot.application.order_gateway.OrderGatewayService`. It refuses new orders when the latest readiness result is negative, writes an `order_submission_blocked` audit event with the readiness reason, and only then delegates ready orders into the audited submission service.
 
+Order activity can be tracked through `futures_bot.application.order_activity.OrderActivityTracker`. It records accepted broker submissions, rejects duplicate client order IDs, audits the recorded activity, and builds the `used_client_order_ids` and `recent_order_timestamps` inputs needed by pre-trade duplicate-ID and order-rate risk controls.
+
 Approved order intents can be submitted through `futures_bot.application.order_submission.OrderSubmissionService`. It always runs the audited risk check first, blocks rejected orders before the broker port is called, converts approved intents into `BrokerOrder` values, submits them through the configured broker adapter, and audits blocked, submitted, and broker-rejected handoffs.
 
 Broker adapters should raise `futures_bot.ports.broker.BrokerSubmissionError` when the broker, exchange, or route rejects a submitted order synchronously. The submission service records a rejected lifecycle with the broker reason and optional broker error code instead of leaving the order in an ambiguous pending state.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from futures_bot.application.order_activity import OrderActivityTracker
 from futures_bot.application.risk_check import RiskCheckService
 from futures_bot.domain.order_lifecycle import OrderLifecycle
 from futures_bot.domain.orders import BrokerOrder, OrderIntent
@@ -23,10 +24,12 @@ class OrderSubmissionService:
         risk_check: RiskCheckService,
         broker: BrokerPort,
         audit_log: AuditLogPort,
+        activity_tracker: OrderActivityTracker | None = None,
     ) -> None:
         self._risk_check = risk_check
         self._broker = broker
         self._audit_log = audit_log
+        self._activity_tracker = activity_tracker
 
     def submit(self, intent: OrderIntent, context: RiskContext) -> OrderSubmissionResult:
         risk_decision = self._risk_check.check(intent, context)
@@ -88,6 +91,12 @@ class OrderSubmissionService:
                 "status": working.status.value,
             }
         )
+        if self._activity_tracker is not None:
+            self._activity_tracker.record_submission(
+                intent=intent,
+                timestamp=context.now,
+                broker_order_id=broker_order_id,
+            )
         return OrderSubmissionResult(
             risk_decision=risk_decision,
             lifecycle=working,
