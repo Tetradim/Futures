@@ -145,6 +145,14 @@ The internal position snapshot is a JSON array:
 
 When `--internal-positions` is omitted, the command uses `INTERNAL_POSITIONS_PATH` and falls back to `data/internal_positions.json`. Missing or malformed internal state is treated as a configuration error. Position mismatches exit nonzero and record a `position_reconciliation` audit event.
 
+Validate operator-supplied margin schedules before using them in rebalance risk contexts:
+
+```powershell
+futures-bot margin-schedules --schedule-file data/margin_schedules.json validate
+```
+
+When `--schedule-file` is omitted, the command uses `MARGIN_SCHEDULE_PATH` and falls back to `data/margin_schedules.json`. It loads the JSON schedule file, validates structure, duplicate instruments, Decimal margin values, timezone-aware expiries, and freshness, then exits nonzero before any broker call if the schedule is missing, malformed, or stale.
+
 Attempt flatten:
 
 ```powershell

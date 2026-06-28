@@ -329,6 +329,84 @@ def test_reconcile_command_reports_mismatches(monkeypatch, tmp_path, capsys):
     assert "positions not reconciled: quantity mismatch for @ESU26: internal=2 broker=1" in captured.err
 
 
+def test_margin_schedules_validate_reports_valid_file(tmp_path, capsys):
+    schedule_path = tmp_path / "state" / "margin_schedules.json"
+    schedule_path.parent.mkdir(parents=True)
+    schedule_path.write_text(
+        json.dumps(
+            [
+                {
+                    "expires_at": "2099-06-29T16:45:00+00:00",
+                    "initial_margin_per_contract": "12000",
+                    "instrument_id": "ES-202609-CME",
+                    "maintenance_margin_per_contract": "10000",
+                    "source": "FCM daily margin schedule 2099-06-28",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "margin-schedules",
+            "--schedule-file",
+            str(schedule_path),
+            "validate",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "margin schedules valid: entries=1" in captured.out
+
+
+def test_margin_schedules_validate_reports_missing_file(tmp_path, capsys):
+    exit_code = main(
+        [
+            "margin-schedules",
+            "--schedule-file",
+            str(tmp_path / "missing.json"),
+            "validate",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "margin schedule file does not exist" in captured.err
+
+
+def test_margin_schedules_validate_reports_stale_schedule(tmp_path, capsys):
+    schedule_path = tmp_path / "margin_schedules.json"
+    schedule_path.write_text(
+        json.dumps(
+            [
+                {
+                    "expires_at": "2020-06-29T16:45:00+00:00",
+                    "initial_margin_per_contract": "12000",
+                    "instrument_id": "ES-202609-CME",
+                    "maintenance_margin_per_contract": "10000",
+                    "source": "stale FCM margin schedule",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    exit_code = main(
+        [
+            "margin-schedules",
+            "--schedule-file",
+            str(schedule_path),
+            "validate",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "margin schedule for ES-202609-CME expired at 2020-06-29T16:45:00+00:00" in captured.err
+
+
 def test_flatten_command_refuses_without_explicit_confirmation_text(capsys):
     exit_code = main(["flatten"])
 

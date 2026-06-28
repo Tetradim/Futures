@@ -12,6 +12,8 @@ from futures_bot.application.broker_connection import (
     BrokerConnectionService,
 )
 from futures_bot.application.kill_switch import KillSwitchService
+from futures_bot.application.margin_estimates import MarginEstimateUnavailable
+from futures_bot.application.margin_schedules import MarginScheduleProvider
 from futures_bot.application.position_flattening import PositionFlatteningService
 from futures_bot.application.reconciliation import ReconcilePositionsUseCase
 from futures_bot.brokers.factory import create_broker
@@ -21,6 +23,7 @@ from futures_bot.brokers.optimus.config import load_optimus_config
 from futures_bot.brokers.tradestation.config import load_tradestation_config
 from futures_bot.storage.audit import JsonlAuditLog
 from futures_bot.storage.kill_switch import JsonKillSwitchStore
+from futures_bot.storage.margin_schedules import JsonMarginScheduleStore
 from futures_bot.storage.positions import JsonPositionStore
 
 FLATTEN_CONFIRMATION = "FLATTEN-LIVE-POSITIONS"
@@ -43,6 +46,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.command == "reconcile":
         return _reconcile(args.broker, args.internal_positions, args.audit_log)
+    if args.command == "margin-schedules":
+        return _margin_schedules(args.margin_schedule_command, args.schedule_file)
     if args.command == "flatten":
         return _flatten(args.confirm, args.broker, args.audit_log)
 
@@ -81,6 +86,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "--audit-log",
         default=os.environ.get("AUDIT_LOG_PATH", "data/audit.jsonl"),
         help="JSONL audit log path. Defaults to AUDIT_LOG_PATH or data/audit.jsonl.",
+    )
+
+    margin_schedules = subparsers.add_parser(
+        "margin-schedules",
+        help="Validate operator-supplied margin schedules.",
+    )
+    margin_schedules.add_argument(
+        "--schedule-file",
+        default=os.environ.get("MARGIN_SCHEDULE_PATH", "data/margin_schedules.json"),
+        help=(
+            "Margin schedule JSON path. "
+            "Defaults to MARGIN_SCHEDULE_PATH or data/margin_schedules.json."
+        ),
+    )
+    margin_schedule_subparsers = margin_schedules.add_subparsers(
+        dest="margin_schedule_command"
+    )
+    margin_schedule_subparsers.add_parser(
+        "validate",
+        help="Validate schedule structure and freshness without placing orders.",
     )
 
     broker_connect = subparsers.add_parser(
@@ -287,6 +312,33 @@ def _reconcile(broker: str | None, internal_positions_path: str, audit_log_path:
         f"broker={selected_broker} "
         f"broker_positions={len(broker_positions)}"
     )
+    return 0
+
+
+def _margin_schedules(command: str | None, schedule_file_path: str) -> int:
+    if command is None:
+        print("margin-schedules requires a subcommand: validate", file=sys.stderr)
+        return 2
+    if command != "validate":
+        print(f"unsupported margin-schedules command: {command}", file=sys.stderr)
+        return 2
+
+    try:
+        entries = JsonMarginScheduleStore(Path(schedule_file_path)).load()
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    try:
+        MarginScheduleProvider(
+            entries=entries,
+            clock=lambda: datetime.now(timezone.utc),
+        ).validate()
+    except MarginEstimateUnavailable as exc:
+        print(exc.reason, file=sys.stderr)
+        return 1
+
+    print(f"margin schedules valid: entries={len(entries)}")
     return 0
 
 

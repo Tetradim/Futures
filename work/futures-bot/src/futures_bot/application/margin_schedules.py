@@ -46,17 +46,30 @@ class MarginScheduleProvider:
             raise MarginEstimateUnavailable(
                 f"margin schedule is required for {order.instrument_id}"
             )
-        if entry.instrument_id != order.instrument_id:
-            raise MarginEstimateUnavailable(
-                f"margin schedule instrument does not match {order.instrument_id}"
-            )
-        if self._clock() >= entry.expires_at:
-            raise MarginEstimateUnavailable(
-                f"margin schedule for {order.instrument_id} expired at "
-                f"{entry.expires_at.isoformat()}"
-            )
+        self._validate_entry(order.instrument_id, entry, self._clock())
 
         return MarginEstimate(
             initial_margin=entry.initial_margin_per_contract * order.quantity,
             maintenance_margin=entry.maintenance_margin_per_contract * order.quantity,
         )
+
+    def validate(self) -> None:
+        now = self._clock()
+        for instrument_id, entry in self._entries.items():
+            self._validate_entry(instrument_id, entry, now)
+
+    def _validate_entry(
+        self,
+        instrument_id: str,
+        entry: MarginScheduleEntry,
+        now: datetime,
+    ) -> None:
+        if entry.instrument_id != instrument_id:
+            raise MarginEstimateUnavailable(
+                f"margin schedule instrument does not match {instrument_id}"
+            )
+        if now >= entry.expires_at:
+            raise MarginEstimateUnavailable(
+                f"margin schedule for {instrument_id} expired at "
+                f"{entry.expires_at.isoformat()}"
+            )
