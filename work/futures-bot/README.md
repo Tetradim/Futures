@@ -210,6 +210,8 @@ Risk contexts for rebalance intents can be built with `futures_bot.application.r
 
 Order margin inputs can be requested through `futures_bot.application.margin_estimates.MarginEstimateService`. It converts intents to broker orders, asks the configured provider for broker/API-derived initial and maintenance margin estimates, audits each estimate, audits provider failures, and raises `MarginEstimateUnavailable` instead of inventing fallback margin.
 
+When a broker route does not expose an order preview, `futures_bot.application.margin_schedules.MarginScheduleProvider` can serve as the approved margin provider from operator-supplied FCM or exchange margin schedules. Each schedule entry must include an instrument ID, positive per-contract initial and maintenance margins, a source label, and a timezone-aware expiry; missing, mismatched, or stale entries raise `MarginEstimateUnavailable`.
+
 The IBKR adapter implements the margin estimate provider boundary through a what-if order preview. It builds the same futures contract and order payload used for submission, sets `whatIf` and `transmit`, parses IBKR initial and maintenance margin changes, and maps preview failures to `MarginEstimateUnavailable`.
 
 The TradeStation adapter implements the same margin estimate provider boundary through the v3 order confirmation endpoint. It reuses the live order payload, parses explicit initial and maintenance margin fields when the confirmation response provides them, and raises `MarginEstimateUnavailable` if TradeStation returns only non-margin estimate fields or rejects the confirmation request.
