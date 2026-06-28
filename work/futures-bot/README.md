@@ -40,6 +40,32 @@ Common IBKR defaults:
 - TWS live: `7496`
 - IB Gateway paper/live ports depend on local gateway configuration
 
+Required TradeStation environment variables:
+
+```powershell
+$env:BROKER_ENV = "paper"   # paper or live
+$env:TRADESTATION_ACCESS_TOKEN = "..."
+$env:TRADESTATION_ACCOUNT_ID = "SIM12345"
+```
+
+TradeStation defaults:
+
+- Paper: `https://sim-api.tradestation.com/v3`
+- Live: `https://api.tradestation.com/v3`
+- Override with `TRADESTATION_BASE_URL` when routing through a controlled proxy.
+
+Required NinjaTrader environment variables:
+
+```powershell
+$env:BROKER_ENV = "paper"   # paper or live
+$env:NINJATRADER_REST_URL = "https://..."
+$env:NINJATRADER_WS_URL = "wss://..."
+$env:NINJATRADER_ACCESS_TOKEN = "..."
+$env:NINJATRADER_ACCOUNT_ID = "SIM12345"
+```
+
+NinjaTrader REST and WebSocket URLs are explicit because deployments and broker access paths can differ.
+
 ## Commands
 
 Validate broker configuration:
