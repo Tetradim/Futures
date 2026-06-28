@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 from futures_bot.application.order_activity import OrderActivityRecord, OrderActivityTracker
+from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.ports.audit import InMemoryAuditLog
 
 
@@ -29,6 +31,10 @@ def test_order_activity_tracker_hydrates_persisted_records_for_risk_inputs():
                 broker_order_id="broker-123",
                 instrument_id="ES-202609-CME",
                 timestamp=NOW - timedelta(seconds=15),
+                side=OrderSide.BUY,
+                quantity=1,
+                order_type=OrderType.LIMIT,
+                limit_price=Decimal("5000.25"),
             ),
         )
     )
@@ -38,4 +44,3 @@ def test_order_activity_tracker_hydrates_persisted_records_for_risk_inputs():
 
     assert snapshot.used_client_order_ids == frozenset({"order-1"})
     assert snapshot.recent_order_timestamps == (NOW - timedelta(seconds=15),)
-

@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from decimal import Decimal
 
 import pytest
 
 from futures_bot.application.order_activity import OrderActivityRecord
+from futures_bot.domain.enums import OrderSide, OrderType
 
 
 NOW = datetime(2026, 6, 28, 14, 50, tzinfo=timezone.utc)
@@ -26,6 +28,10 @@ def _record(client_order_id: str = "order-1") -> OrderActivityRecord:
         broker_order_id="broker-123",
         instrument_id="ES-202609-CME",
         timestamp=NOW,
+        side=OrderSide.BUY,
+        quantity=1,
+        order_type=OrderType.LIMIT,
+        limit_price=Decimal("5000.25"),
     )
 
 
@@ -40,6 +46,10 @@ def test_jsonl_order_activity_store_persists_and_reloads_records(tmp_path):
         "broker_order_id": "broker-123",
         "client_order_id": "order-1",
         "instrument_id": "ES-202609-CME",
+        "limit_price": "5000.25",
+        "order_type": "limit",
+        "quantity": 1,
+        "side": "buy",
         "timestamp": "2026-06-28T14:50:00+00:00",
     }
 
@@ -60,4 +70,3 @@ def test_jsonl_order_activity_store_rejects_malformed_records(tmp_path):
 
     with pytest.raises(ValueError, match="invalid order activity record"):
         store.load()
-

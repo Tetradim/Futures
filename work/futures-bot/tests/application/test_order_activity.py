@@ -34,6 +34,12 @@ def test_order_activity_records_submission_and_builds_risk_inputs():
 
     assert snapshot.used_client_order_ids == frozenset({"order-1"})
     assert snapshot.recent_order_timestamps == (NOW,)
+    record = tracker.record_for("order-1")
+    assert record is not None
+    assert record.side == OrderSide.BUY
+    assert record.quantity == 1
+    assert record.order_type == OrderType.LIMIT
+    assert record.limit_price == Decimal("5000.25")
     assert audit_log.events == (
         {
             "type": "order_activity_recorded",
@@ -86,6 +92,37 @@ def test_order_activity_rejects_duplicate_client_order_id():
         assert str(exc) == "client order ID was already recorded"
     else:
         raise AssertionError("expected duplicate client order ID to be rejected")
+
+
+class InMemoryOrderActivityStore:
+    def __init__(self):
+        self.records = []
+
+    def load(self):
+        return tuple(self.records)
+
+    def append(self, record):
+        self.records.append(record)
+
+
+def test_order_activity_rehydrates_order_metadata_from_store():
+    audit_log = InMemoryAuditLog()
+    store = InMemoryOrderActivityStore()
+    tracker = OrderActivityTracker(audit_log, store=store)
+    tracker.record_submission(
+        intent=_intent(),
+        timestamp=NOW,
+        broker_order_id="broker-123",
+    )
+
+    rehydrated = OrderActivityTracker(InMemoryAuditLog(), store=store)
+    record = rehydrated.record_for("order-1")
+
+    assert record is not None
+    assert record.side == OrderSide.BUY
+    assert record.quantity == 1
+    assert record.order_type == OrderType.LIMIT
+    assert record.limit_price == Decimal("5000.25")
 
 
 def test_order_activity_snapshot_requires_positive_recent_window():

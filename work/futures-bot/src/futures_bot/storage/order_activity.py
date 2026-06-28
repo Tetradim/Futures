@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Mapping
 
 from futures_bot.application.order_activity import OrderActivityRecord
+from futures_bot.domain.enums import OrderSide, OrderType
 
 
 class JsonlOrderActivityStore:
@@ -50,13 +52,25 @@ class JsonlOrderActivityStore:
             raise ValueError("broker_order_id is required")
         if not record.instrument_id:
             raise ValueError("instrument_id is required")
-        if record.timestamp.tzinfo is None:
+        if record.timestamp.tzinfo is None or record.timestamp.utcoffset() is None:
             raise ValueError("timestamp must be timezone-aware")
+        if not isinstance(record.side, OrderSide):
+            raise ValueError("side is required")
+        if record.quantity <= 0:
+            raise ValueError("quantity must be positive")
+        if not isinstance(record.order_type, OrderType):
+            raise ValueError("order_type is required")
+        if record.order_type == OrderType.LIMIT and record.limit_price is None:
+            raise ValueError("limit_price is required for limit orders")
 
         return {
             "client_order_id": record.client_order_id,
             "broker_order_id": record.broker_order_id,
             "instrument_id": record.instrument_id,
+            "side": record.side.value,
+            "quantity": record.quantity,
+            "order_type": record.order_type.value,
+            "limit_price": str(record.limit_price) if record.limit_price is not None else None,
             "timestamp": record.timestamp.isoformat(),
         }
 
@@ -69,6 +83,10 @@ class JsonlOrderActivityStore:
             broker_order_id = value["broker_order_id"]
             instrument_id = value["instrument_id"]
             timestamp_value = value["timestamp"]
+            side_value = value["side"]
+            quantity_value = value["quantity"]
+            order_type_value = value["order_type"]
+            limit_price_value = value["limit_price"]
             if not isinstance(client_order_id, str):
                 raise TypeError
             if not isinstance(broker_order_id, str):
@@ -77,15 +95,28 @@ class JsonlOrderActivityStore:
                 raise TypeError
             if not isinstance(timestamp_value, str):
                 raise TypeError
+            if not isinstance(side_value, str):
+                raise TypeError
+            if not isinstance(quantity_value, int):
+                raise TypeError
+            if not isinstance(order_type_value, str):
+                raise TypeError
+            if limit_price_value is not None and not isinstance(limit_price_value, str):
+                raise TypeError
+            limit_price = Decimal(limit_price_value) if limit_price_value is not None else None
             timestamp = datetime.fromisoformat(timestamp_value)
             record = OrderActivityRecord(
                 client_order_id=client_order_id,
                 broker_order_id=broker_order_id,
                 instrument_id=instrument_id,
                 timestamp=timestamp,
+                side=OrderSide(side_value),
+                quantity=quantity_value,
+                order_type=OrderType(order_type_value),
+                limit_price=limit_price,
             )
             self._encode_record(record)
-        except (KeyError, TypeError, ValueError) as exc:
+        except (KeyError, TypeError, ValueError, InvalidOperation) as exc:
             raise ValueError("invalid order activity record") from exc
 
         return record
