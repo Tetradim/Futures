@@ -1,10 +1,15 @@
 import json
 from datetime import datetime, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 
 from futures_bot.cli import main
 from futures_bot.domain.orders import BrokerOrder
 from futures_bot.domain.portfolio import AccountSnapshot, Position
+
+
+def _route_for(broker: object):
+    return SimpleNamespace(execution=broker)
 
 
 def _set_valid_ibkr_env(monkeypatch):
@@ -183,11 +188,11 @@ def test_broker_connect_uses_configured_broker_and_writes_audit_log(
     _set_valid_tradestation_env(monkeypatch)
     broker = FakeBroker()
 
-    def create_fake_broker(name: str, env: object):
+    def create_fake_route(name: str, env: object):
         assert name == "tradestation"
-        return broker
+        return _route_for(broker)
 
-    monkeypatch.setattr("futures_bot.cli.create_broker", create_fake_broker)
+    monkeypatch.setattr("futures_bot.cli_commands.broker.create_broker_route", create_fake_route)
     audit_log_path = tmp_path / "audit" / "broker.jsonl"
 
     exit_code = main(
@@ -209,10 +214,10 @@ def test_broker_connect_uses_configured_broker_and_writes_audit_log(
 
 
 def test_broker_connect_reports_factory_errors(monkeypatch, capsys):
-    def create_failing_broker(name: str, env: object):
+    def create_failing_route(name: str, env: object):
         raise ValueError(f"{name} broker adapter is not implemented yet")
 
-    monkeypatch.setattr("futures_bot.cli.create_broker", create_failing_broker)
+    monkeypatch.setattr("futures_bot.cli_commands.broker.create_broker_route", create_failing_route)
 
     exit_code = main(["broker-connect", "--broker", "ibkr"])
 
@@ -248,11 +253,11 @@ def test_reconcile_command_uses_configured_broker_and_writes_audit_log(
     _set_valid_tradestation_env(monkeypatch)
     broker = FakeBroker()
 
-    def create_fake_broker(name: str, env: object):
+    def create_fake_route(name: str, env: object):
         assert name == "tradestation"
-        return broker
+        return _route_for(broker)
 
-    monkeypatch.setattr("futures_bot.cli.create_broker", create_fake_broker)
+    monkeypatch.setattr("futures_bot.cli_commands.broker.create_broker_route", create_fake_route)
     internal_positions_path = tmp_path / "state" / "positions.json"
     internal_positions_path.parent.mkdir(parents=True)
     internal_positions_path.write_text(
@@ -292,11 +297,11 @@ def test_reconcile_command_reports_mismatches(monkeypatch, tmp_path, capsys):
     _set_valid_tradestation_env(monkeypatch)
     broker = FakeBroker()
 
-    def create_fake_broker(name: str, env: object):
+    def create_fake_route(name: str, env: object):
         assert name == "tradestation"
-        return broker
+        return _route_for(broker)
 
-    monkeypatch.setattr("futures_bot.cli.create_broker", create_fake_broker)
+    monkeypatch.setattr("futures_bot.cli_commands.broker.create_broker_route", create_fake_route)
     internal_positions_path = tmp_path / "positions.json"
     internal_positions_path.write_text(
         json.dumps(
@@ -486,11 +491,11 @@ def test_flatten_command_uses_configured_broker_and_writes_audit_log(
     _set_valid_tradestation_env(monkeypatch)
     broker = FlattenBroker()
 
-    def create_fake_broker(name: str, env: object):
+    def create_fake_route(name: str, env: object):
         assert name == "tradestation"
-        return broker
+        return _route_for(broker)
 
-    monkeypatch.setattr("futures_bot.cli.create_broker", create_fake_broker)
+    monkeypatch.setattr("futures_bot.cli_commands.broker.create_broker_route", create_fake_route)
     audit_log_path = tmp_path / "audit" / "flatten.jsonl"
 
     exit_code = main(

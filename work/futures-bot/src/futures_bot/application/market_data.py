@@ -160,6 +160,27 @@ class MarketDataHistoryService:
             )
 
         ordered_bars = tuple(sorted(bars, key=lambda bar: bar.day))
+        if not ordered_bars:
+            detail = "historical data provider returned no bars"
+            self._audit_log.append(
+                {
+                    "type": "market_data_history_rejected",
+                    "timestamp": request.timestamp.isoformat(),
+                    "provider": request.provider_name,
+                    "instrument_id": request.instrument_id,
+                    "start_day": request.start_day.isoformat(),
+                    "end_day": request.end_day.isoformat(),
+                    "reason": "history_empty",
+                    "detail": detail,
+                }
+            )
+            return MarketDataHistoryResult(
+                received=False,
+                bars=(),
+                reason="history_empty",
+                detail=detail,
+            )
+
         rejected = self._reject_invalid_history(request, ordered_bars)
         if rejected is not None:
             return rejected

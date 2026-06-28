@@ -12,6 +12,7 @@ from futures_bot.brokers.ibkr.config import IbkrConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
 from futures_bot.domain.portfolio import AccountSnapshot, Position
+from futures_bot.market.ohlcv import decode_optional_integral_int
 from futures_bot.ports.broker import (
     BrokerCancellationError,
     BrokerConnectionError,
@@ -297,7 +298,7 @@ def _optional_int(value: Mapping[str, object], *names: str) -> int | None:
     for name in names:
         text = _optional_text(value, name)
         if text is not None:
-            return int(Decimal(text))
+            return decode_optional_integral_int(text, name)
     return None
 
 

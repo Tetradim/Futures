@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Mapping
 
+from futures_bot.market.ohlcv import decode_optional_integral_int
 from futures_bot.ports.market_data import HistoricalBar
 
 
@@ -98,9 +99,7 @@ class JsonHistoricalBarStore:
         return bar
 
     def _decode_volume(self, value: object) -> int | None:
-        if value is None:
-            return None
-        return int(Decimal(str(value)))
+        return decode_optional_integral_int(value, "volume")
 
     def _sort_and_validate_unique(
         self,

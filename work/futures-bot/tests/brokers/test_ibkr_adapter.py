@@ -436,6 +436,28 @@ def test_ibkr_adapter_maps_historical_data_errors():
     assert exc_info.value.provider_error_code == "162"
 
 
+def test_ibkr_adapter_rejects_fractional_historical_volume():
+    client = RecordingIbkrClient()
+    client.historical_bar_rows = (
+        {
+            "date": "20260913",
+            "open": "5000.00",
+            "high": "5010.00",
+            "low": "4995.00",
+            "close": "5005.00",
+            "volume": "12345.5",
+        },
+    )
+    broker = _adapter(client)
+
+    with pytest.raises(MarketDataError, match="volume must be an integer"):
+        broker.get_daily_bars(
+            "ES-202609-CME",
+            start_day=date(2026, 9, 13),
+            end_day=date(2026, 9, 14),
+        )
+
+
 def test_ibkr_adapter_cancels_order_by_numeric_broker_order_id():
     client = RecordingIbkrClient()
     broker = _adapter(client)

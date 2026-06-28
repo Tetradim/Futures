@@ -18,6 +18,11 @@ class FakeOrder:
     pass
 
 
+class FakeOrderState:
+    initMarginChange = "12000.25"
+    maintMarginChange = "9000.75"
+
+
 class FakeBar:
     date = "20260913"
     open = 5000.0
@@ -69,6 +74,8 @@ class FakeEClient:
 
     def placeOrder(self, order_id: int, contract: FakeContract, order: FakeOrder) -> None:
         self.placed_orders.append((order_id, contract, order))
+        if getattr(order, "whatIf", False):
+            self.wrapper.openOrder(order_id, contract, order, FakeOrderState())
 
     def cancelOrder(self, order_id: int) -> None:
         self.canceled_order_ids.append(order_id)
@@ -242,6 +249,46 @@ def test_ibapi_tws_client_places_order_with_ibapi_objects():
     assert order.lmtPrice == "5000.25"
     assert order.tif == "DAY"
     assert order.orderRef == "client-1"
+
+
+def test_ibapi_tws_client_previews_order_margin_with_what_if_order():
+    from futures_bot.brokers.ibkr.ibapi_client import IbapiTwsClient, create_ibapi_app
+
+    client = IbapiTwsClient(
+        app_factory=lambda: create_ibapi_app(_modules()),
+        thread_factory=ImmediateThread,
+        timeout_seconds=0.01,
+    )
+    client.connect("127.0.0.1", 7497, 101)
+
+    order_id = client.next_order_id()
+    preview = client.preview_order_margin(
+        order_id=order_id,
+        contract={
+            "currency": "USD",
+            "exchange": "CME",
+            "lastTradeDateOrContractMonth": "202609",
+            "secType": "FUT",
+            "symbol": "ES",
+        },
+        order={
+            "action": "BUY",
+            "orderRef": "client-1",
+            "orderType": "MKT",
+            "tif": "DAY",
+            "totalQuantity": 1,
+            "whatIf": True,
+        },
+    )
+
+    assert preview == {
+        "initMarginChange": "12000.25",
+        "maintMarginChange": "9000.75",
+    }
+    placed_order_id, contract, order = client._app.placed_orders[0]
+    assert placed_order_id == 9001
+    assert contract.symbol == "ES"
+    assert order.whatIf is True
 
 
 def test_ibapi_tws_client_cancels_order_id():

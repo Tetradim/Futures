@@ -84,6 +84,19 @@ class IbapiTwsClient:
     ) -> None:
         self._require_app().place_order_payload(order_id, contract, order)
 
+    def preview_order_margin(
+        self,
+        order_id: int,
+        contract: Mapping[str, object],
+        order: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        return self._require_app().preview_order_margin_payload(
+            order_id,
+            contract,
+            order,
+            self._timeout_seconds,
+        )
+
     def cancel_order(self, order_id: int) -> None:
         self._require_app().cancel_order_by_id(order_id)
 
@@ -115,6 +128,7 @@ def create_ibapi_app(modules: IbapiModules) -> Any:
             self._next_order_id_event = threading.Event()
             self._account_requests: dict[int, tuple[list[Mapping[str, object]], threading.Event]] = {}
             self._historical_requests: dict[int, tuple[list[Mapping[str, object]], threading.Event]] = {}
+            self._order_preview_requests: dict[int, tuple[dict[str, object], threading.Event]] = {}
             self._position_rows: list[Mapping[str, object]] = []
             self._position_event = threading.Event()
             self._request_errors: dict[int, IbkrClientError] = {}
@@ -173,6 +187,44 @@ def create_ibapi_app(modules: IbapiModules) -> Any:
                 )
             except Exception as exc:
                 raise IbkrClientError(str(exc), "IBAPI_PLACE_ORDER_FAILED") from exc
+
+        def preview_order_margin_payload(
+            self,
+            order_id: int,
+            contract: Mapping[str, object],
+            order: Mapping[str, object],
+            timeout_seconds: float,
+        ) -> Mapping[str, object]:
+            preview: dict[str, object] = {}
+            event = threading.Event()
+            self._order_preview_requests[order_id] = (preview, event)
+            try:
+                self.placeOrder(
+                    order_id,
+                    _object_from_mapping(modules.Contract, contract),
+                    _object_from_mapping(modules.Order, order),
+                )
+            except Exception as exc:
+                self._order_preview_requests.pop(order_id, None)
+                raise IbkrClientError(str(exc), "IBAPI_MARGIN_PREVIEW_FAILED") from exc
+
+            try:
+                if not event.wait(timeout_seconds):
+                    self._raise_pending_error(order_id)
+                    raise IbkrClientError(
+                        "timed out waiting for IBKR what-if margin preview",
+                        "IBAPI_TIMEOUT",
+                    )
+                self._raise_pending_error(order_id)
+            finally:
+                self._order_preview_requests.pop(order_id, None)
+
+            if not preview:
+                raise IbkrClientError(
+                    "IBKR what-if margin preview did not return order state",
+                    "IBAPI_MARGIN_PREVIEW_EMPTY",
+                )
+            return dict(preview)
 
         def cancel_order_by_id(self, order_id: int) -> None:
             try:
@@ -281,6 +333,20 @@ def create_ibapi_app(modules: IbapiModules) -> Any:
                 _rows, event = request
                 event.set()
 
+        def openOrder(  # noqa: N802 - IBKR callback name
+            self,
+            orderId: int,
+            contract: object,
+            order: object,
+            orderState: object,
+        ) -> None:
+            request = self._order_preview_requests.get(orderId)
+            if request is None:
+                return
+            preview, event = request
+            preview.update(_order_state_margin_mapping(orderState))
+            event.set()
+
         def error(  # noqa: A003, N802 - IBKR callback name
             self,
             reqId: int,
@@ -298,6 +364,10 @@ def create_ibapi_app(modules: IbapiModules) -> Any:
                 historical_request = self._historical_requests.get(reqId)
                 if historical_request is not None:
                     _rows, event = historical_request
+                    event.set()
+                order_preview_request = self._order_preview_requests.get(reqId)
+                if order_preview_request is not None:
+                    _preview, event = order_preview_request
                     event.set()
             else:
                 self._global_error = error
@@ -348,4 +418,21 @@ def _historical_bar_mapping(bar: object) -> Mapping[str, object]:
         key: str(value)
         for key in keys
         if (value := getattr(bar, key, None)) is not None
+    }
+
+
+def _order_state_margin_mapping(order_state: object) -> Mapping[str, object]:
+    keys = (
+        "initMarginChange",
+        "maintMarginChange",
+        "equityWithLoanChange",
+        "commission",
+        "minCommission",
+        "maxCommission",
+        "commissionCurrency",
+    )
+    return {
+        key: str(value)
+        for key in keys
+        if (value := getattr(order_state, key, None)) not in (None, "")
     }

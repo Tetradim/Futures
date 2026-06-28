@@ -16,6 +16,7 @@ from futures_bot.brokers.tradestation.config import TradeStationConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
 from futures_bot.domain.portfolio import AccountSnapshot, Position
+from futures_bot.market.ohlcv import decode_optional_integral_int
 from futures_bot.ports.broker import (
     BrokerCancellationError,
     BrokerConnectionError,
@@ -404,7 +405,7 @@ def _optional_int(value: Mapping[str, object], *names: str) -> int | None:
     for name in names:
         raw_value = value.get(name)
         if raw_value is not None:
-            return int(Decimal(str(raw_value)))
+            return decode_optional_integral_int(raw_value, name)
     return None
 
 

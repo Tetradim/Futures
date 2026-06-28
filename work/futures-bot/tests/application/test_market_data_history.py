@@ -15,7 +15,7 @@ NOW = datetime(2026, 6, 28, 14, 36, tzinfo=timezone.utc)
 class RecordingHistoricalDataProvider:
     def __init__(self, bars: tuple[HistoricalBar, ...] | None = None) -> None:
         self.requests: list[tuple[str, date, date]] = []
-        self.bars = bars or (
+        self.bars = bars if bars is not None else (
             _bar("ES-202609-CME", date(2026, 9, 13), "5000"),
             _bar("ES-202609-CME", date(2026, 9, 14), "5010"),
         )
@@ -112,6 +112,31 @@ def test_market_data_history_service_audits_provider_failure():
             "reason": "market_data_error",
             "detail": "historical data permission is not active",
             "provider_error_code": "NO_HISTORY_PERMISSION",
+        },
+    )
+
+
+def test_market_data_history_service_rejects_empty_history():
+    audit_log = InMemoryAuditLog()
+    provider = RecordingHistoricalDataProvider(bars=())
+    service = MarketDataHistoryService(provider=provider, audit_log=audit_log)
+
+    result = service.get_daily_bars(_request())
+
+    assert result.received is False
+    assert result.bars == ()
+    assert result.reason == "history_empty"
+    assert result.detail == "historical data provider returned no bars"
+    assert audit_log.events == (
+        {
+            "type": "market_data_history_rejected",
+            "timestamp": "2026-06-28T14:36:00+00:00",
+            "provider": "tradestation",
+            "instrument_id": "ES-202609-CME",
+            "start_day": "2026-09-13",
+            "end_day": "2026-09-14",
+            "reason": "history_empty",
+            "detail": "historical data provider returned no bars",
         },
     )
 

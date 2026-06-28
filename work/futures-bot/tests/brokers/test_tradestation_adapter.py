@@ -416,6 +416,33 @@ def test_tradestation_get_daily_bars_rejects_invalid_payload():
         )
 
 
+def test_tradestation_get_daily_bars_rejects_fractional_volume():
+    transport = RecordingTransport(
+        (
+            {
+                "Bars": [
+                    {
+                        "TimeStamp": "2026-09-13T00:00:00Z",
+                        "Open": "5000.00",
+                        "High": "5010.00",
+                        "Low": "4995.00",
+                        "Close": "5005.00",
+                        "TotalVolume": "12345.5",
+                    }
+                ]
+            },
+        )
+    )
+    broker = _adapter(transport)
+
+    with pytest.raises(MarketDataError, match="TotalVolume must be an integer"):
+        broker.get_daily_bars(
+            "@ESU26",
+            start_day=date(2026, 9, 13),
+            end_day=date(2026, 9, 14),
+        )
+
+
 def test_tradestation_cancel_order_uses_delete_endpoint():
     transport = RecordingTransport((None,))
     broker = _adapter(transport)

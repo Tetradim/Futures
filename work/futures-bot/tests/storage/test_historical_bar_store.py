@@ -111,6 +111,18 @@ def test_json_historical_bar_store_rejects_malformed_records(tmp_path):
         store.load()
 
 
+def test_json_historical_bar_store_rejects_fractional_volume(tmp_path):
+    path = tmp_path / "historical_bars.json"
+    path.write_text(
+        json.dumps([_record("ES-202609-CME", "2026-09-13", "5000", volume="12345.5")]),
+        encoding="utf-8",
+    )
+    store = _store_class()(path)
+
+    with pytest.raises(ValueError, match="invalid historical bar record"):
+        store.load()
+
+
 def _bar(
     instrument_id: str,
     day: date,
