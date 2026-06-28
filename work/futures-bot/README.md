@@ -94,6 +94,16 @@ futures-bot config-check --broker optimus
 
 When `--broker` is omitted, the command uses `BROKER` and falls back to `ibkr`. The command prints non-secret connection details and never prints broker tokens.
 
+Connect to a configured broker and fetch account state without placing orders:
+
+```powershell
+$env:BROKER = "tradestation"
+$env:BROKER_ENV = "paper"
+futures-bot broker-connect --broker tradestation --audit-log data/audit.jsonl
+```
+
+`broker-connect` currently supports TradeStation because it has a real adapter wired. It uses the configured paper or live TradeStation base URL, validates the account, fetches balances and positions, writes the broker connection audit event to the JSONL audit log, and never submits or cancels orders.
+
 Attempt reconciliation:
 
 ```powershell

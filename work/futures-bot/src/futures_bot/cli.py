@@ -4,11 +4,19 @@ import argparse
 import os
 import sys
 from collections.abc import Sequence
+from datetime import datetime, timezone
+from pathlib import Path
 
+from futures_bot.application.broker_connection import (
+    BrokerConnectionRequest,
+    BrokerConnectionService,
+)
+from futures_bot.brokers.factory import create_broker
 from futures_bot.brokers.ibkr.config import load_ibkr_config
 from futures_bot.brokers.ninjatrader.config import load_ninjatrader_config
 from futures_bot.brokers.optimus.config import load_optimus_config
 from futures_bot.brokers.tradestation.config import load_tradestation_config
+from futures_bot.storage.audit import JsonlAuditLog
 
 FLATTEN_CONFIRMATION = "FLATTEN-LIVE-POSITIONS"
 
@@ -19,6 +27,8 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "config-check":
         return _config_check(args.broker)
+    if args.command == "broker-connect":
+        return _broker_connect(args.broker, args.audit_log)
     if args.command == "reconcile":
         return _reconcile()
     if args.command == "flatten":
@@ -42,6 +52,24 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     subparsers.add_parser("reconcile", help="Reconcile internal and broker positions.")
+
+    broker_connect = subparsers.add_parser(
+        "broker-connect",
+        help="Connect to a configured broker and fetch account state without placing orders.",
+    )
+    broker_connect.add_argument(
+        "--broker",
+        default=None,
+        help=(
+            "Broker to connect: tradestation. Defaults to BROKER or tradestation. "
+            "IBKR, NinjaTrader, and Optimus require their real adapters first."
+        ),
+    )
+    broker_connect.add_argument(
+        "--audit-log",
+        default=os.environ.get("AUDIT_LOG_PATH", "data/audit.jsonl"),
+        help="JSONL audit log path. Defaults to AUDIT_LOG_PATH or data/audit.jsonl.",
+    )
 
     flatten = subparsers.add_parser("flatten", help="Flatten live broker positions.")
     flatten.add_argument("--confirm", default="", help=f"Must equal {FLATTEN_CONFIRMATION}.")
@@ -98,6 +126,39 @@ def _load_config_message(broker: str) -> str:
             f"api_url={config.api_url or 'not-set'}"
         )
     raise ValueError(f"unsupported broker: {broker}")
+
+
+def _broker_connect(broker: str | None, audit_log_path: str) -> int:
+    selected_broker = (broker or os.environ.get("BROKER") or "tradestation").strip().lower()
+    try:
+        configured_broker = create_broker(selected_broker, os.environ)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    environment = os.environ.get("BROKER_ENV", "").strip().lower()
+    service = BrokerConnectionService(
+        broker=configured_broker,
+        audit_log=JsonlAuditLog(Path(audit_log_path)),
+    )
+    result = service.connect(
+        BrokerConnectionRequest(
+            broker_name=selected_broker,
+            environment=environment,
+            timestamp=datetime.now(timezone.utc),
+        )
+    )
+    if not result.connected or result.account is None:
+        print(f"broker connect failed: {result.reason}", file=sys.stderr)
+        return 1
+
+    print(
+        "broker connected: "
+        f"broker={selected_broker} "
+        f"account_id={result.account.account_id} "
+        f"positions={len(result.positions)}"
+    )
+    return 0
 
 
 def _reconcile() -> int:

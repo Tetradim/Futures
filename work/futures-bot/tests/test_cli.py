@@ -1,4 +1,9 @@
+from datetime import datetime, timezone
+from decimal import Decimal
+
 from futures_bot.cli import main
+from futures_bot.domain.orders import BrokerOrder
+from futures_bot.domain.portfolio import AccountSnapshot, Position
 
 
 def _set_valid_ibkr_env(monkeypatch):
@@ -110,6 +115,85 @@ def test_config_check_uses_broker_environment_variable(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "TradeStation config ok" in captured.out
+
+
+class FakeBroker:
+    def __init__(self) -> None:
+        self.connected = False
+
+    def connect(self) -> None:
+        self.connected = True
+
+    def get_account(self) -> AccountSnapshot:
+        return AccountSnapshot(
+            account_id="SIM12345",
+            equity=Decimal("100000"),
+            initial_margin=Decimal("10000"),
+            maintenance_margin=Decimal("8000"),
+            buying_power=Decimal("50000"),
+            timestamp=datetime(2026, 6, 28, 16, 0, tzinfo=timezone.utc),
+        )
+
+    def get_positions(self) -> tuple[Position, ...]:
+        return (
+            Position(
+                instrument_id="@ESU26",
+                quantity=1,
+                average_price=Decimal("5000.25"),
+            ),
+        )
+
+    def submit_order(self, order: BrokerOrder) -> str:
+        raise NotImplementedError
+
+    def cancel_order(self, broker_order_id: str) -> None:
+        raise NotImplementedError
+
+
+def test_broker_connect_uses_configured_broker_and_writes_audit_log(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    _set_valid_tradestation_env(monkeypatch)
+    broker = FakeBroker()
+
+    def create_fake_broker(name: str, env: object):
+        assert name == "tradestation"
+        return broker
+
+    monkeypatch.setattr("futures_bot.cli.create_broker", create_fake_broker)
+    audit_log_path = tmp_path / "audit" / "broker.jsonl"
+
+    exit_code = main(
+        [
+            "broker-connect",
+            "--broker",
+            "tradestation",
+            "--audit-log",
+            str(audit_log_path),
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert broker.connected is True
+    assert "broker connected: broker=tradestation account_id=SIM12345 positions=1" in captured.out
+    assert "secret" not in captured.out
+    assert "broker_connected" in audit_log_path.read_text(encoding="utf-8")
+
+
+def test_broker_connect_reports_factory_errors(monkeypatch, capsys):
+    def create_failing_broker(name: str, env: object):
+        raise ValueError(f"{name} broker adapter is not implemented yet")
+
+    monkeypatch.setattr("futures_bot.cli.create_broker", create_failing_broker)
+
+    exit_code = main(["broker-connect", "--broker", "ibkr"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert "ibkr broker adapter is not implemented yet" in captured.err
 
 
 def test_config_check_rejects_unknown_broker(capsys):
