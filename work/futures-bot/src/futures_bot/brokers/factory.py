@@ -5,6 +5,7 @@ from typing import Mapping
 
 from futures_bot.brokers.ibkr import IbkrBroker, IbkrClientPort, IbapiTwsClient, load_ibkr_config
 from futures_bot.brokers.ninjatrader import NinjaTraderBroker, load_ninjatrader_config
+from futures_bot.brokers.optimus import OptimusBroker, load_optimus_config
 from futures_bot.brokers.tradestation import TradeStationBroker, load_tradestation_config
 from futures_bot.ports.broker import BrokerPort
 
@@ -22,6 +23,6 @@ def create_broker(
         return IbkrBroker(load_ibkr_config(env), client)
     if broker_name == "ninjatrader":
         return NinjaTraderBroker(load_ninjatrader_config(env))
-    if broker_name in {"optimus"}:
-        raise ValueError(f"{broker_name} broker adapter is not implemented yet")
+    if broker_name == "optimus":
+        return OptimusBroker(load_optimus_config(env))
     raise ValueError(f"unsupported broker: {broker_name}")

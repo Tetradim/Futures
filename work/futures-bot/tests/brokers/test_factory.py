@@ -24,6 +24,18 @@ def _ninjatrader_env() -> dict[str, str]:
     }
 
 
+def _optimus_env() -> dict[str, str]:
+    return {
+        "BROKER_ENV": "paper",
+        "OPTIMUS_ROUTE": "rithmic",
+        "OPTIMUS_USERNAME": "user-123",
+        "OPTIMUS_PASSWORD": "secret-password",
+        "OPTIMUS_ACCOUNT_ID": "SIM12345",
+        "OPTIMUS_API_URL": "https://optimus-bridge.example.test/api",
+        "OPTIMUS_APP_NAME": "futures-bot-test",
+    }
+
+
 def test_create_broker_returns_tradestation_adapter_from_environment():
     from futures_bot.brokers.factory import create_broker
 
@@ -90,6 +102,18 @@ def test_create_broker_returns_ninjatrader_adapter_from_environment():
     assert broker.config.rest_url == "https://nt-api.example.test/v1/api"
     assert broker.config.websocket_url == "wss://nt-stream.example.test/v1/ws"
     assert broker.config.account_id == "Sim101"
+
+
+def test_create_broker_returns_optimus_adapter_from_environment_when_bridge_url_is_configured():
+    from futures_bot.brokers.factory import create_broker
+    from futures_bot.brokers.optimus import OptimusBroker
+
+    broker = create_broker("optimus", _optimus_env())
+
+    assert isinstance(broker, OptimusBroker)
+    assert broker.config.route.value == "rithmic"
+    assert broker.config.api_url == "https://optimus-bridge.example.test/api"
+    assert broker.config.account_id == "SIM12345"
 
 
 def test_create_broker_rejects_unknown_broker():

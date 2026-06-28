@@ -2,7 +2,7 @@
 
 Production-oriented futures trading bot core.
 
-This project is being built safety-first. The current slice provides tested domain models, pre-trade risk controls, pre-broker risk decision auditing, broker connection lifecycle handling, broker-facing order submission orchestration, broker configuration validation, initial live-capable TradeStation and NinjaTrader HTTP adapters, an IBKR broker-port adapter boundary for TWS or IB Gateway clients, reconciliation logic, immutable audit events, durable JSONL audit and order-activity storage, and conservative operator CLI commands.
+This project is being built safety-first. The current slice provides tested domain models, pre-trade risk controls, pre-broker risk decision auditing, broker connection lifecycle handling, broker-facing order submission orchestration, broker configuration validation, live-capable TradeStation, NinjaTrader, IBKR, and Optimus broker adapter boundaries, reconciliation logic, immutable audit events, durable JSONL audit and order-activity storage, and conservative operator CLI commands.
 
 It does not yet submit live orders. That is intentional. Live order submission should only be added after broker connection lifecycle, order acknowledgement handling, fill handling, cancellation, reconciliation, and audit trails are implemented and tested against a real broker API.
 
@@ -86,7 +86,7 @@ $env:OPTIMUS_PASSWORD = "..."
 $env:OPTIMUS_ACCOUNT_ID = "SIM12345"
 ```
 
-Supported Optimus execution routes are `rithmic`, `cqg`, `tt`, `cts`, `firetip`, `gain`, `oak`, and `qst`. Use `OPTIMUS_API_URL` only when routing through a controlled HTTP bridge for the selected execution provider. Use `OPTIMUS_APP_NAME` to identify the bot session to that bridge or route adapter.
+Supported Optimus execution routes are `rithmic`, `cqg`, `tt`, `cts`, `firetip`, `gain`, `oak`, and `qst`. `futures_bot.brokers.optimus.OptimusBroker` uses `OPTIMUS_API_URL` as a controlled HTTP bridge for the selected execution provider. It sends the selected route, app name, credentials, and account ID to that bridge, then maps account, position, order, and cancel responses into the shared broker port. Use `OPTIMUS_APP_NAME` to identify the bot session to that bridge or route adapter.
 
 ## Commands
 
@@ -110,9 +110,10 @@ $env:BROKER_ENV = "paper"
 futures-bot broker-connect --broker tradestation --audit-log data/audit.jsonl
 futures-bot broker-connect --broker ibkr --audit-log data/audit.jsonl
 futures-bot broker-connect --broker ninjatrader --audit-log data/audit.jsonl
+futures-bot broker-connect --broker optimus --audit-log data/audit.jsonl
 ```
 
-`broker-connect` currently supports TradeStation, IBKR, and NinjaTrader. TradeStation and NinjaTrader use their configured paper or live HTTP base URLs. IBKR uses TWS or IB Gateway through the optional `ibapi` transport. These paths validate broker connectivity, fetch account and position state, write the broker connection audit event to the JSONL audit log, and never submit or cancel orders.
+`broker-connect` currently supports TradeStation, IBKR, NinjaTrader, and Optimus. TradeStation and NinjaTrader use their configured paper or live HTTP base URLs. IBKR uses TWS or IB Gateway through the optional `ibapi` transport. Optimus uses the configured HTTP route bridge for the selected execution provider. These paths validate broker connectivity, fetch account and position state, write the broker connection audit event to the JSONL audit log, and never submit or cancel orders.
 
 Attempt reconciliation:
 
@@ -182,11 +183,7 @@ Accepted broker order activity can be persisted with `futures_bot.storage.order_
 
 ## Next Adapter Targets
 
-Broker adapter implementation order:
-
-1. Optimus Futures through the selected route, such as Rithmic, CQG, Trading Technologies, CTS, or Firetip
-
-Each adapter must implement the same broker port and must not leak broker SDK types into the domain or application layers.
+All named broker adapter boundaries are now represented in the shared broker port. Next broker work should deepen provider-specific transports, streaming order updates, and contract normalization without leaking broker SDK types into the domain or application layers.
 
 ## Strategy Roadmap
 
