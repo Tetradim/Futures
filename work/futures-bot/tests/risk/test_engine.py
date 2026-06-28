@@ -54,6 +54,8 @@ def _limits() -> RiskLimits:
         max_position_abs=10,
         max_margin_usage=Decimal("0.50"),
         max_daily_loss=Decimal("2500"),
+        max_order_notional=Decimal("1000000"),
+        max_position_notional=Decimal("2000000"),
         max_bid_ask_spread_percent=Decimal("0.001"),
         account_stale_after=timedelta(seconds=30),
         market_data_stale_after=timedelta(seconds=10),
@@ -133,6 +135,14 @@ def test_risk_engine_rejects_max_order_quantity_breach():
     assert decision.reason == RiskReason.MAX_ORDER_QUANTITY
 
 
+def test_risk_engine_rejects_max_order_notional_breach():
+    decision = RiskEngine(_limits()).evaluate(_intent(quantity=5), _context())
+
+    assert decision.approved is False
+    assert decision.reason == RiskReason.MAX_ORDER_NOTIONAL
+    assert decision.detail == "estimated order notional exceeds limit"
+
+
 def test_risk_engine_rejects_max_resulting_position_breach():
     position = Position(
         instrument_id="ES-202609-CME",
@@ -144,6 +154,20 @@ def test_risk_engine_rejects_max_resulting_position_breach():
 
     assert decision.approved is False
     assert decision.reason == RiskReason.MAX_POSITION
+
+
+def test_risk_engine_rejects_max_position_notional_breach():
+    position = Position(
+        instrument_id="ES-202609-CME",
+        quantity=8,
+        average_price=Decimal("5000"),
+    )
+
+    decision = RiskEngine(_limits()).evaluate(_intent(quantity=1), _context(current_position=position))
+
+    assert decision.approved is False
+    assert decision.reason == RiskReason.MAX_POSITION_NOTIONAL
+    assert decision.detail == "estimated resulting position notional exceeds limit"
 
 
 def test_risk_engine_rejects_max_margin_usage_breach():
@@ -269,6 +293,8 @@ def test_risk_limits_rejects_non_positive_max_daily_loss():
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
             max_daily_loss=Decimal("0"),
+            max_order_notional=Decimal("1000000"),
+            max_position_notional=Decimal("2000000"),
             max_bid_ask_spread_percent=Decimal("0.001"),
             account_stale_after=timedelta(seconds=30),
             market_data_stale_after=timedelta(seconds=10),
@@ -287,6 +313,8 @@ def test_risk_limits_rejects_non_positive_max_bid_ask_spread_percent():
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
             max_daily_loss=Decimal("2500"),
+            max_order_notional=Decimal("1000000"),
+            max_position_notional=Decimal("2000000"),
             max_bid_ask_spread_percent=Decimal("0"),
             account_stale_after=timedelta(seconds=30),
             market_data_stale_after=timedelta(seconds=10),
@@ -296,3 +324,43 @@ def test_risk_limits_rejects_non_positive_max_bid_ask_spread_percent():
         assert str(exc) == "max_bid_ask_spread_percent must be positive"
     else:
         raise AssertionError("expected non-positive max_bid_ask_spread_percent to be rejected")
+
+
+def test_risk_limits_rejects_non_positive_max_order_notional():
+    try:
+        RiskLimits(
+            max_order_quantity=5,
+            max_position_abs=10,
+            max_margin_usage=Decimal("0.50"),
+            max_daily_loss=Decimal("2500"),
+            max_order_notional=Decimal("0"),
+            max_position_notional=Decimal("2000000"),
+            max_bid_ask_spread_percent=Decimal("0.001"),
+            account_stale_after=timedelta(seconds=30),
+            market_data_stale_after=timedelta(seconds=10),
+            price_collar_percent=Decimal("0.05"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "max_order_notional must be positive"
+    else:
+        raise AssertionError("expected non-positive max_order_notional to be rejected")
+
+
+def test_risk_limits_rejects_non_positive_max_position_notional():
+    try:
+        RiskLimits(
+            max_order_quantity=5,
+            max_position_abs=10,
+            max_margin_usage=Decimal("0.50"),
+            max_daily_loss=Decimal("2500"),
+            max_order_notional=Decimal("1000000"),
+            max_position_notional=Decimal("0"),
+            max_bid_ask_spread_percent=Decimal("0.001"),
+            account_stale_after=timedelta(seconds=30),
+            market_data_stale_after=timedelta(seconds=10),
+            price_collar_percent=Decimal("0.05"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "max_position_notional must be positive"
+    else:
+        raise AssertionError("expected non-positive max_position_notional to be rejected")

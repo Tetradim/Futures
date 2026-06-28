@@ -121,6 +121,8 @@ The pre-trade risk engine rejects orders when:
 - market quote is crossed
 - bid/ask spread exceeds the configured limit
 - resulting position exceeds the configured limit
+- estimated order notional exceeds the configured limit
+- estimated resulting position notional exceeds the configured limit
 - estimated margin usage exceeds the configured limit
 - realized daily loss reaches the configured limit
 - the contract is past the last safe trade date

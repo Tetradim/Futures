@@ -16,6 +16,8 @@ class RiskLimits:
     max_position_abs: int
     max_margin_usage: Decimal
     max_daily_loss: Decimal
+    max_order_notional: Decimal
+    max_position_notional: Decimal
     max_bid_ask_spread_percent: Decimal
     account_stale_after: timedelta
     market_data_stale_after: timedelta
@@ -30,6 +32,10 @@ class RiskLimits:
             raise ValueError("max_margin_usage must be between 0 and 1")
         if self.max_daily_loss <= 0:
             raise ValueError("max_daily_loss must be positive")
+        if self.max_order_notional <= 0:
+            raise ValueError("max_order_notional must be positive")
+        if self.max_position_notional <= 0:
+            raise ValueError("max_position_notional must be positive")
         if self.max_bid_ask_spread_percent <= 0:
             raise ValueError("max_bid_ask_spread_percent must be positive")
         if self.account_stale_after <= timedelta(0):
@@ -103,9 +109,21 @@ class RiskEngine:
         if intent.quantity > self._limits.max_order_quantity:
             return RiskDecision.reject(RiskReason.MAX_ORDER_QUANTITY, "order quantity exceeds limit")
 
+        reference_price = intent.limit_price if intent.limit_price is not None else context.market.last
+        order_notional = self._notional(intent.quantity, reference_price, context.instrument)
+        if order_notional > self._limits.max_order_notional:
+            return RiskDecision.reject(RiskReason.MAX_ORDER_NOTIONAL, "estimated order notional exceeds limit")
+
         resulting_quantity = context.current_position.quantity_after(intent.side, intent.quantity)
         if abs(resulting_quantity) > self._limits.max_position_abs:
             return RiskDecision.reject(RiskReason.MAX_POSITION, "resulting position exceeds limit")
+
+        position_notional = self._notional(abs(resulting_quantity), reference_price, context.instrument)
+        if position_notional > self._limits.max_position_notional:
+            return RiskDecision.reject(
+                RiskReason.MAX_POSITION_NOTIONAL,
+                "estimated resulting position notional exceeds limit",
+            )
 
         margin_usage = (
             context.account.initial_margin + context.estimated_order_initial_margin
@@ -132,6 +150,9 @@ class RiskEngine:
                 return RiskDecision.reject(RiskReason.PRICE_COLLAR, "limit price is outside price collar")
 
         return RiskDecision.approve()
+
+    def _notional(self, quantity: int, price: Decimal, instrument: FuturesInstrument) -> Decimal:
+        return Decimal(quantity) * price * instrument.spec.multiplier
 
     def _evaluate_quote(self, market: MarketSnapshot) -> RiskDecision:
         if market.bid is None or market.ask is None:
