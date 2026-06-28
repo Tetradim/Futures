@@ -6,6 +6,7 @@ from typing import Mapping
 
 import pytest
 
+from futures_bot.application.margin_estimates import MarginEstimateUnavailable
 from futures_bot.brokers.ninjatrader.config import BrokerEnvironment, NinjaTraderConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
@@ -232,6 +233,27 @@ def test_ninjatrader_submit_order_maps_http_errors_to_submission_error():
 
     assert exc_info.value.reason == "order rejected: account locked"
     assert exc_info.value.broker_error_code == "ACCOUNT_LOCKED"
+
+
+def test_ninjatrader_adapter_fails_closed_for_order_margin_estimates():
+    transport = RecordingTransport(())
+    broker = _adapter(transport)
+
+    with pytest.raises(MarginEstimateUnavailable) as exc_info:
+        broker.estimate_order_margin(
+            BrokerOrder(
+                instrument_id="ES 09-26",
+                side=OrderSide.BUY,
+                quantity=1,
+                order_type=OrderType.MARKET,
+                client_order_id="client-4",
+            )
+        )
+
+    assert exc_info.value.reason == (
+        "NinjaTrader adapter does not expose broker-provided order margin estimates"
+    )
+    assert transport.requests == []
 
 
 def test_ninjatrader_cancel_order_uses_cancel_endpoint():
