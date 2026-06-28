@@ -72,7 +72,12 @@ Validate broker configuration:
 
 ```powershell
 futures-bot config-check
+futures-bot config-check --broker ibkr
+futures-bot config-check --broker tradestation
+futures-bot config-check --broker ninjatrader
 ```
+
+When `--broker` is omitted, the command uses `BROKER` and falls back to `ibkr`. The command prints non-secret connection details and never prints broker tokens.
 
 Attempt reconciliation:
 
