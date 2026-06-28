@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from futures_bot.application.kill_switch import KillSwitchState
 from futures_bot.application.order_gateway import OrderGatewayService
 from futures_bot.application.order_submission import OrderSubmissionService
 from futures_bot.application.risk_check import RiskCheckService
@@ -36,6 +37,27 @@ class RecordingBroker:
         return self.broker_order_id
 
     def cancel_order(self, broker_order_id: str) -> None:
+        raise NotImplementedError
+
+
+class InMemoryKillSwitchStore:
+    def __init__(self, state: KillSwitchState) -> None:
+        self.state = state
+        self.load_count = 0
+
+    def load(self) -> KillSwitchState:
+        self.load_count += 1
+        return self.state
+
+    def save(self, state: KillSwitchState) -> None:
+        self.state = state
+
+
+class FailingKillSwitchStore:
+    def load(self) -> KillSwitchState:
+        raise ValueError("invalid kill switch state")
+
+    def save(self, state: KillSwitchState) -> None:
         raise NotImplementedError
 
 
@@ -122,13 +144,21 @@ def _intent() -> OrderIntent:
     )
 
 
-def _gateway(broker: RecordingBroker, audit_log: InMemoryAuditLog) -> OrderGatewayService:
+def _gateway(
+    broker: RecordingBroker,
+    audit_log: InMemoryAuditLog,
+    kill_switch_store: InMemoryKillSwitchStore | FailingKillSwitchStore | None = None,
+) -> OrderGatewayService:
     submission = OrderSubmissionService(
         risk_check=RiskCheckService(RiskEngine(_limits()), audit_log),
         broker=broker,
         audit_log=audit_log,
     )
-    return OrderGatewayService(submission=submission, audit_log=audit_log)
+    return OrderGatewayService(
+        submission=submission,
+        audit_log=audit_log,
+        kill_switch_store=kill_switch_store,
+    )
 
 
 def test_order_gateway_blocks_not_ready_session_before_risk_or_broker_submission():
@@ -167,6 +197,100 @@ def test_order_gateway_blocks_not_ready_session_before_risk_or_broker_submission
             "limit_price": "5000.25",
         },
     )
+
+
+def test_order_gateway_blocks_when_persisted_kill_switch_is_active():
+    audit_log = InMemoryAuditLog()
+    broker = RecordingBroker()
+    kill_switch_store = InMemoryKillSwitchStore(
+        KillSwitchState(
+            active=True,
+            reason="operator halt before news release",
+            updated_at=NOW,
+        )
+    )
+    gateway = _gateway(broker, audit_log, kill_switch_store=kill_switch_store)
+
+    result = gateway.submit(
+        intent=_intent(),
+        context=_context(),
+        readiness=TradingReadinessResult(ready=True, reason=None, detail="ready"),
+        timestamp=NOW,
+    )
+
+    assert result.submitted is False
+    assert result.submission is None
+    assert result.reason == "kill_switch_active"
+    assert result.detail == "operator halt before news release"
+    assert broker.submitted_orders == []
+    assert kill_switch_store.load_count == 1
+    assert audit_log.events == (
+        {
+            "type": "order_submission_blocked",
+            "timestamp": "2026-06-28T14:35:00+00:00",
+            "client_order_id": "order-1",
+            "instrument_id": "ES-202609-CME",
+            "reason": "kill_switch_active",
+            "detail": "operator halt before news release",
+            "readiness_reason": None,
+            "side": "buy",
+            "quantity": 1,
+            "order_type": "limit",
+            "limit_price": "5000.25",
+        },
+    )
+
+
+def test_order_gateway_fails_closed_when_persisted_kill_switch_state_is_unavailable():
+    audit_log = InMemoryAuditLog()
+    broker = RecordingBroker()
+    gateway = _gateway(broker, audit_log, kill_switch_store=FailingKillSwitchStore())
+
+    result = gateway.submit(
+        intent=_intent(),
+        context=_context(),
+        readiness=TradingReadinessResult(ready=True, reason=None, detail="ready"),
+        timestamp=NOW,
+    )
+
+    assert result.submitted is False
+    assert result.submission is None
+    assert result.reason == "kill_switch_state_unavailable"
+    assert result.detail == "invalid kill switch state"
+    assert broker.submitted_orders == []
+    assert audit_log.events == (
+        {
+            "type": "order_submission_blocked",
+            "timestamp": "2026-06-28T14:35:00+00:00",
+            "client_order_id": "order-1",
+            "instrument_id": "ES-202609-CME",
+            "reason": "kill_switch_state_unavailable",
+            "detail": "invalid kill switch state",
+            "readiness_reason": None,
+            "side": "buy",
+            "quantity": 1,
+            "order_type": "limit",
+            "limit_price": "5000.25",
+        },
+    )
+
+
+def test_order_gateway_submits_when_persisted_kill_switch_is_inactive():
+    audit_log = InMemoryAuditLog()
+    broker = RecordingBroker()
+    kill_switch_store = InMemoryKillSwitchStore(KillSwitchState.inactive())
+    gateway = _gateway(broker, audit_log, kill_switch_store=kill_switch_store)
+
+    result = gateway.submit(
+        intent=_intent(),
+        context=_context(),
+        readiness=TradingReadinessResult(ready=True, reason=None, detail="ready"),
+        timestamp=NOW,
+    )
+
+    assert result.submitted is True
+    assert broker.submitted_orders == [BrokerOrder.from_intent(_intent())]
+    assert kill_switch_store.load_count == 1
 
 
 def test_order_gateway_submits_ready_session_through_existing_submission_path():
