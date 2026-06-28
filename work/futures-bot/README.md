@@ -2,7 +2,7 @@
 
 Production-oriented futures trading bot core.
 
-This project is being built safety-first. The current slice provides tested domain models, pre-trade risk controls, pre-broker risk decision auditing, broker connection lifecycle handling, broker-facing order submission orchestration, broker configuration validation, live-capable TradeStation, NinjaTrader, IBKR, and Optimus broker adapter boundaries, broker-backed reconciliation, fill-driven internal position accounting, immutable audit events, durable JSONL audit, position, order-activity, order-lifecycle, and kill-switch storage, confirmed emergency position flattening, and conservative operator CLI commands.
+This project is being built safety-first. The current slice provides tested domain models, pre-trade risk controls, pre-broker risk decision auditing, broker connection lifecycle handling, broker-facing order submission orchestration, broker configuration validation, live-capable TradeStation, NinjaTrader, IBKR, and Optimus broker adapter boundaries, broker-backed reconciliation, fill-driven internal position accounting, immutable audit events, durable JSONL audit, instrument-catalog, position, order-activity, order-lifecycle, margin-schedule, and kill-switch storage, confirmed emergency position flattening, and conservative operator CLI commands.
 
 It does not yet run autonomous strategy-driven live order entry. The current live-capable order submission surface is the explicit operator-confirmed emergency flatten command. Strategy-driven live order loops should only be added after broker connection lifecycle, order acknowledgement handling, fill handling, cancellation, reconciliation, persistent safety state, and audit trails are implemented and tested against a real broker API.
 
@@ -221,6 +221,8 @@ Order margin inputs can be requested through `futures_bot.application.margin_est
 When a broker route does not expose an order preview, `futures_bot.application.margin_schedules.MarginScheduleProvider` can serve as the approved margin provider from operator-supplied FCM or exchange margin schedules. Each schedule entry must include an instrument ID, positive per-contract initial and maintenance margins, a source label, and a timezone-aware expiry; missing, mismatched, or stale entries raise `MarginEstimateUnavailable`.
 
 Operator-supplied margin schedules can be loaded and saved with `futures_bot.storage.margin_schedules.JsonMarginScheduleStore`. It stores one JSON array of instrument schedules with Decimal values encoded as strings and ISO timezone-aware expiry timestamps, rejects missing files, malformed records, and duplicate instruments, and can feed `MarginScheduleProvider` after loading.
+
+Operator-supplied instrument catalogs can be loaded and saved with `futures_bot.storage.instruments.JsonInstrumentStore`. It stores one JSON array of futures contracts with Decimal multiplier and tick-size values encoded as strings, settlement type, exchange, contract month, first-notice date, last-trade date, and last-safe trade date, then reconstructs validated `FuturesInstrument` values before risk contexts use them.
 
 The IBKR adapter implements the margin estimate provider boundary through a what-if order preview. It builds the same futures contract and order payload used for submission, sets `whatIf` and `transmit`, parses IBKR initial and maintenance margin changes, and maps preview failures to `MarginEstimateUnavailable`.
 
