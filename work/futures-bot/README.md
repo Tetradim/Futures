@@ -138,6 +138,8 @@ Pre-trade risk checks can be run through `futures_bot.application.risk_check.Ris
 
 Broker adapters can be connected through `futures_bot.application.broker_connection.BrokerConnectionService`. It accepts only real broker environments (`paper` or `live`), calls the configured adapter, retrieves account and position state after connection, records `broker_connected` audit events, and records `broker_connection_failed` when adapters raise `futures_bot.ports.broker.BrokerConnectionError`.
 
+Trading readiness can be evaluated through `futures_bot.application.trading_readiness.TradingReadinessService`. It blocks trading when the broker is disconnected, account state is missing or stale, or positions are not reconciled, and records a `trading_readiness` audit event for each evaluation before order submission is allowed.
+
 Approved order intents can be submitted through `futures_bot.application.order_submission.OrderSubmissionService`. It always runs the audited risk check first, blocks rejected orders before the broker port is called, converts approved intents into `BrokerOrder` values, submits them through the configured broker adapter, and audits blocked, submitted, and broker-rejected handoffs.
 
 Broker adapters should raise `futures_bot.ports.broker.BrokerSubmissionError` when the broker, exchange, or route rejects a submitted order synchronously. The submission service records a rejected lifecycle with the broker reason and optional broker error code instead of leaving the order in an ambiguous pending state.
