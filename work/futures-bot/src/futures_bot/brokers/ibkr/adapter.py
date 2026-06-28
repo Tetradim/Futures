@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Protocol
 
+from futures_bot.application.margin_estimates import MarginEstimateUnavailable
+from futures_bot.application.rebalance_risk_context import MarginEstimate
 from futures_bot.brokers.ibkr.config import IbkrConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
@@ -46,6 +48,14 @@ class IbkrClientPort(Protocol):
         order: Mapping[str, object],
     ) -> None:
         """Place an order through TWS or IB Gateway."""
+
+    def preview_order_margin(
+        self,
+        order_id: int,
+        contract: Mapping[str, object],
+        order: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        """Return IBKR what-if order margin changes."""
 
     def cancel_order(self, order_id: int) -> None:
         """Cancel an order through TWS or IB Gateway."""
@@ -106,6 +116,31 @@ class IbkrBroker:
             raise BrokerSubmissionError(exc.reason, exc.broker_error_code) from exc
         except ValueError as exc:
             raise BrokerSubmissionError(str(exc)) from exc
+
+    def estimate_order_margin(self, order: BrokerOrder) -> MarginEstimate:
+        try:
+            order_id = self.client.next_order_id()
+            margin_preview = self.client.preview_order_margin(
+                order_id=order_id,
+                contract=_contract(order.instrument_id),
+                order=_what_if_order(order),
+            )
+            return MarginEstimate(
+                initial_margin=_margin_change(
+                    margin_preview,
+                    "initMarginChange",
+                    "InitMarginChange",
+                ),
+                maintenance_margin=_margin_change(
+                    margin_preview,
+                    "maintMarginChange",
+                    "MaintMarginChange",
+                ),
+            )
+        except IbkrClientError as exc:
+            raise MarginEstimateUnavailable(exc.reason, exc.broker_error_code) from exc
+        except ValueError as exc:
+            raise MarginEstimateUnavailable(str(exc)) from exc
 
     def cancel_order(self, broker_order_id: str) -> None:
         try:
@@ -190,6 +225,22 @@ def _order(order: BrokerOrder) -> Mapping[str, object]:
             raise ValueError("limit price is required for IBKR limit orders")
         payload["lmtPrice"] = str(order.limit_price)
     return payload
+
+
+def _what_if_order(order: BrokerOrder) -> Mapping[str, object]:
+    payload = dict(_order(order))
+    payload["transmit"] = True
+    payload["whatIf"] = True
+    return payload
+
+
+def _margin_change(value: Mapping[str, object], *names: str) -> Decimal:
+    for name in names:
+        text = _optional_text(value, name)
+        if text is not None:
+            return Decimal(text)
+    allowed = " or ".join(names)
+    raise ValueError(f"IBKR margin preview did not include {allowed}")
 
 
 def _action(side: OrderSide) -> str:

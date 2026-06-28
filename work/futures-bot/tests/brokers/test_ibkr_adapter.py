@@ -6,6 +6,8 @@ from typing import Mapping
 
 import pytest
 
+from futures_bot.application.margin_estimates import MarginEstimateUnavailable
+from futures_bot.application.rebalance_risk_context import MarginEstimate
 from futures_bot.brokers.ibkr.config import BrokerEnvironment, IbkrConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
@@ -19,7 +21,12 @@ class RecordingIbkrClient:
     def __init__(self) -> None:
         self.connect_calls: list[tuple[str, int, int]] = []
         self.placed_orders: list[dict[str, object]] = []
+        self.margin_preview_orders: list[dict[str, object]] = []
         self.canceled_order_ids: list[int] = []
+        self.margin_preview = {
+            "initMarginChange": "12000.25",
+            "maintMarginChange": "9000.75",
+        }
         self.account_rows: tuple[Mapping[str, object], ...] = (
             {"account": "DU12345", "tag": "NetLiquidation", "value": "100000.50", "currency": "USD"},
             {"account": "DU12345", "tag": "InitMarginReq", "value": "12000.25", "currency": "USD"},
@@ -75,6 +82,21 @@ class RecordingIbkrClient:
                 "order": dict(order),
             }
         )
+
+    def preview_order_margin(
+        self,
+        order_id: int,
+        contract: Mapping[str, object],
+        order: Mapping[str, object],
+    ) -> Mapping[str, object]:
+        self.margin_preview_orders.append(
+            {
+                "order_id": order_id,
+                "contract": dict(contract),
+                "order": dict(order),
+            }
+        )
+        return self.margin_preview
 
     def cancel_order(self, order_id: int) -> None:
         self.canceled_order_ids.append(order_id)
@@ -234,6 +256,79 @@ def test_ibkr_adapter_maps_order_submission_errors():
 
     assert exc_info.value.reason == "order rejected: contract is ambiguous"
     assert exc_info.value.broker_error_code == "AMBIGUOUS_CONTRACT"
+
+
+def test_ibkr_adapter_estimates_order_margin_with_what_if_order():
+    client = RecordingIbkrClient()
+    broker = _adapter(client)
+
+    estimate = broker.estimate_order_margin(
+        BrokerOrder(
+            instrument_id="ES-202609-CME",
+            side=OrderSide.BUY,
+            quantity=2,
+            order_type=OrderType.LIMIT,
+            client_order_id="client-1",
+            limit_price=Decimal("5000.25"),
+        )
+    )
+
+    assert estimate == MarginEstimate(
+        initial_margin=Decimal("12000.25"),
+        maintenance_margin=Decimal("9000.75"),
+    )
+    assert client.margin_preview_orders == [
+        {
+            "order_id": 9001,
+            "contract": {
+                "currency": "USD",
+                "exchange": "CME",
+                "lastTradeDateOrContractMonth": "202609",
+                "secType": "FUT",
+                "symbol": "ES",
+            },
+            "order": {
+                "action": "BUY",
+                "lmtPrice": "5000.25",
+                "orderRef": "client-1",
+                "orderType": "LMT",
+                "tif": "DAY",
+                "totalQuantity": 2,
+                "transmit": True,
+                "whatIf": True,
+            },
+        }
+    ]
+    assert client.placed_orders == []
+
+
+def test_ibkr_adapter_maps_margin_preview_errors():
+    from futures_bot.brokers.ibkr.adapter import IbkrClientError
+
+    class FailingMarginClient(RecordingIbkrClient):
+        def preview_order_margin(
+            self,
+            order_id: int,
+            contract: Mapping[str, object],
+            order: Mapping[str, object],
+        ) -> Mapping[str, object]:
+            raise IbkrClientError("what-if margin request failed", "201")
+
+    broker = _adapter(FailingMarginClient())
+
+    with pytest.raises(MarginEstimateUnavailable) as exc_info:
+        broker.estimate_order_margin(
+            BrokerOrder(
+                instrument_id="ES-202609-CME",
+                side=OrderSide.BUY,
+                quantity=1,
+                order_type=OrderType.MARKET,
+                client_order_id="client-4",
+            )
+        )
+
+    assert exc_info.value.reason == "what-if margin request failed"
+    assert exc_info.value.broker_error_code == "201"
 
 
 def test_ibkr_adapter_cancels_order_by_numeric_broker_order_id():
