@@ -22,6 +22,14 @@ def _set_valid_ninjatrader_env(monkeypatch):
     monkeypatch.setenv("NINJATRADER_ACCOUNT_ID", "SIM12345")
 
 
+def _set_valid_optimus_env(monkeypatch):
+    monkeypatch.setenv("BROKER_ENV", "paper")
+    monkeypatch.setenv("OPTIMUS_ROUTE", "rithmic")
+    monkeypatch.setenv("OPTIMUS_USERNAME", "secret-user")
+    monkeypatch.setenv("OPTIMUS_PASSWORD", "secret-password")
+    monkeypatch.setenv("OPTIMUS_ACCOUNT_ID", "SIM12345")
+
+
 def test_config_check_exits_zero_for_valid_ibkr_config(monkeypatch, capsys):
     _set_valid_ibkr_env(monkeypatch)
 
@@ -73,6 +81,24 @@ def test_config_check_exits_zero_for_valid_ninjatrader_config(monkeypatch, capsy
         "account_id=SIM12345"
     ) in captured.out
     assert "secret-token" not in captured.out
+
+
+def test_config_check_exits_zero_for_valid_optimus_config(monkeypatch, capsys):
+    _set_valid_optimus_env(monkeypatch)
+
+    exit_code = main(["config-check", "--broker", "optimus"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert (
+        "Optimus config ok: "
+        "environment=paper "
+        "route=rithmic "
+        "account_id=SIM12345 "
+        "api_url=not-set"
+    ) in captured.out
+    assert "secret-user" not in captured.out
+    assert "secret-password" not in captured.out
 
 
 def test_config_check_uses_broker_environment_variable(monkeypatch, capsys):

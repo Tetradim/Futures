@@ -7,6 +7,7 @@ from collections.abc import Sequence
 
 from futures_bot.brokers.ibkr.config import load_ibkr_config
 from futures_bot.brokers.ninjatrader.config import load_ninjatrader_config
+from futures_bot.brokers.optimus.config import load_optimus_config
 from futures_bot.brokers.tradestation.config import load_tradestation_config
 
 FLATTEN_CONFIRMATION = "FLATTEN-LIVE-POSITIONS"
@@ -35,7 +36,10 @@ def _build_parser() -> argparse.ArgumentParser:
     config_check.add_argument(
         "--broker",
         default=None,
-        help="Broker to validate: ibkr, tradestation, or ninjatrader. Defaults to BROKER or ibkr.",
+        help=(
+            "Broker to validate: ibkr, tradestation, ninjatrader, or optimus. "
+            "Defaults to BROKER or ibkr."
+        ),
     )
     subparsers.add_parser("reconcile", help="Reconcile internal and broker positions.")
 
@@ -83,6 +87,15 @@ def _load_config_message(broker: str) -> str:
             f"rest_url={config.rest_url} "
             f"websocket_url={config.websocket_url} "
             f"account_id={config.account_id}"
+        )
+    if broker == "optimus":
+        config = load_optimus_config(os.environ)
+        return (
+            "Optimus config ok: "
+            f"environment={config.environment.value} "
+            f"route={config.route.value} "
+            f"account_id={config.account_id} "
+            f"api_url={config.api_url or 'not-set'}"
         )
     raise ValueError(f"unsupported broker: {broker}")
 

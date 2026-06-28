@@ -66,6 +66,18 @@ $env:NINJATRADER_ACCOUNT_ID = "SIM12345"
 
 NinjaTrader REST and WebSocket URLs are explicit because deployments and broker access paths can differ.
 
+Required Optimus Futures environment variables:
+
+```powershell
+$env:BROKER_ENV = "paper"   # paper or live
+$env:OPTIMUS_ROUTE = "rithmic"
+$env:OPTIMUS_USERNAME = "..."
+$env:OPTIMUS_PASSWORD = "..."
+$env:OPTIMUS_ACCOUNT_ID = "SIM12345"
+```
+
+Supported Optimus execution routes are `rithmic`, `cqg`, `tt`, `cts`, `firetip`, `gain`, `oak`, and `qst`. Use `OPTIMUS_API_URL` only when routing through a controlled HTTP bridge for the selected execution provider. Use `OPTIMUS_APP_NAME` to identify the bot session to that bridge or route adapter.
+
 ## Commands
 
 Validate broker configuration:
@@ -75,6 +87,7 @@ futures-bot config-check
 futures-bot config-check --broker ibkr
 futures-bot config-check --broker tradestation
 futures-bot config-check --broker ninjatrader
+futures-bot config-check --broker optimus
 ```
 
 When `--broker` is omitted, the command uses `BROKER` and falls back to `ibkr`. The command prints non-secret connection details and never prints broker tokens.
