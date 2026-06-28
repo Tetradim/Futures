@@ -15,6 +15,12 @@ cd work/futures-bot
 python -m pip install -e ".[dev]"
 ```
 
+Install the optional IBKR TWS/Gateway transport:
+
+```powershell
+python -m pip install -e ".[ibkr]"
+```
+
 Run tests:
 
 ```powershell
@@ -40,7 +46,7 @@ Common IBKR defaults:
 - TWS live: `7496`
 - IB Gateway paper/live ports depend on local gateway configuration
 
-`futures_bot.brokers.ibkr.IbkrBroker` implements the broker port around a TWS or IB Gateway client contract. It maps IBKR account summary rows, position rows, next-valid order IDs, futures contracts, order payloads, and cancel requests into the shared broker port. The CLI factory does not yet auto-create an IBKR event-loop client; that concrete TWS client transport is the next IBKR wiring step.
+`futures_bot.brokers.ibkr.IbkrBroker` implements the broker port around a TWS or IB Gateway client contract. It maps IBKR account summary rows, position rows, next-valid order IDs, futures contracts, order payloads, and cancel requests into the shared broker port. `futures_bot.brokers.ibkr.IbapiTwsClient` provides the concrete optional `ibapi` transport for TWS or IB Gateway callback flows.
 
 Required TradeStation environment variables:
 
@@ -102,9 +108,10 @@ Connect to a configured broker and fetch account state without placing orders:
 $env:BROKER = "tradestation"
 $env:BROKER_ENV = "paper"
 futures-bot broker-connect --broker tradestation --audit-log data/audit.jsonl
+futures-bot broker-connect --broker ibkr --audit-log data/audit.jsonl
 ```
 
-`broker-connect` currently supports TradeStation because it has a real adapter wired. It uses the configured paper or live TradeStation base URL, validates the account, fetches balances and positions, writes the broker connection audit event to the JSONL audit log, and never submits or cancels orders.
+`broker-connect` currently supports TradeStation and IBKR. TradeStation uses the configured paper or live HTTP base URL. IBKR uses TWS or IB Gateway through the optional `ibapi` transport. Both paths validate broker connectivity, fetch account and position state, write the broker connection audit event to the JSONL audit log, and never submit or cancel orders.
 
 Attempt reconciliation:
 
@@ -176,9 +183,8 @@ Accepted broker order activity can be persisted with `futures_bot.storage.order_
 
 Broker adapter implementation order:
 
-1. IBKR concrete TWS or IB Gateway client transport
-2. NinjaTrader
-3. Optimus Futures through the selected route, such as Rithmic, CQG, Trading Technologies, CTS, or Firetip
+1. NinjaTrader
+2. Optimus Futures through the selected route, such as Rithmic, CQG, Trading Technologies, CTS, or Firetip
 
 Each adapter must implement the same broker port and must not leak broker SDK types into the domain or application layers.
 

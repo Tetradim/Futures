@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from futures_bot.brokers.ibkr import IbkrBroker
 from futures_bot.brokers.tradestation import TradeStationBroker
 
 
@@ -23,19 +24,50 @@ def test_create_broker_returns_tradestation_adapter_from_environment():
     assert broker.config.account_id == "SIM12345"
 
 
-def test_create_broker_rejects_ibkr_until_tws_client_factory_is_wired():
+def test_create_broker_returns_ibkr_adapter_from_environment_with_injected_client():
     from futures_bot.brokers.factory import create_broker
 
-    with pytest.raises(ValueError, match="ibkr broker adapter requires a TWS client implementation"):
-        create_broker(
-            "ibkr",
-            {
-                "BROKER_ENV": "paper",
-                "IBKR_HOST": "127.0.0.1",
-                "IBKR_PORT": "7497",
-                "IBKR_CLIENT_ID": "101",
-            },
-        )
+    class Client:
+        def connect(self, host: str, port: int, client_id: int) -> None:
+            pass
+
+        def account_summary(self) -> tuple[dict[str, object], ...]:
+            return ()
+
+        def positions(self) -> tuple[dict[str, object], ...]:
+            return ()
+
+        def next_order_id(self) -> int:
+            return 1
+
+        def place_order(
+            self,
+            order_id: int,
+            contract: dict[str, object],
+            order: dict[str, object],
+        ) -> None:
+            pass
+
+        def cancel_order(self, order_id: int) -> None:
+            pass
+
+    client = Client()
+    broker = create_broker(
+        "ibkr",
+        {
+            "BROKER_ENV": "paper",
+            "IBKR_HOST": "127.0.0.1",
+            "IBKR_PORT": "7497",
+            "IBKR_CLIENT_ID": "101",
+        },
+        ibkr_client_factory=lambda: client,
+    )
+
+    assert isinstance(broker, IbkrBroker)
+    assert broker.config.host == "127.0.0.1"
+    assert broker.config.port == 7497
+    assert broker.config.client_id == 101
+    assert broker.client is client
 
 
 def test_create_broker_rejects_unknown_broker():
