@@ -16,6 +16,7 @@ class RiskLimits:
     max_position_abs: int
     max_margin_usage: Decimal
     max_daily_loss: Decimal
+    max_bid_ask_spread_percent: Decimal
     account_stale_after: timedelta
     market_data_stale_after: timedelta
     price_collar_percent: Decimal
@@ -29,6 +30,8 @@ class RiskLimits:
             raise ValueError("max_margin_usage must be between 0 and 1")
         if self.max_daily_loss <= 0:
             raise ValueError("max_daily_loss must be positive")
+        if self.max_bid_ask_spread_percent <= 0:
+            raise ValueError("max_bid_ask_spread_percent must be positive")
         if self.account_stale_after <= timedelta(0):
             raise ValueError("account_stale_after must be positive")
         if self.market_data_stale_after <= timedelta(0):
@@ -93,6 +96,10 @@ class RiskEngine:
         if context.realized_pnl_today <= -self._limits.max_daily_loss:
             return RiskDecision.reject(RiskReason.MAX_DAILY_LOSS, "realized daily loss limit reached")
 
+        quote_decision = self._evaluate_quote(context.market)
+        if not quote_decision.approved:
+            return quote_decision
+
         if intent.quantity > self._limits.max_order_quantity:
             return RiskDecision.reject(RiskReason.MAX_ORDER_QUANTITY, "order quantity exceeds limit")
 
@@ -123,5 +130,19 @@ class RiskEngine:
             distance = abs(intent.limit_price - context.market.last) / context.market.last
             if distance > self._limits.price_collar_percent:
                 return RiskDecision.reject(RiskReason.PRICE_COLLAR, "limit price is outside price collar")
+
+        return RiskDecision.approve()
+
+    def _evaluate_quote(self, market: MarketSnapshot) -> RiskDecision:
+        if market.bid is None or market.ask is None:
+            return RiskDecision.reject(RiskReason.MARKET_NOT_TWO_SIDED, "market quote is not two-sided")
+
+        if market.bid > market.ask:
+            return RiskDecision.reject(RiskReason.CROSSED_MARKET, "market bid is greater than ask")
+
+        mid = (market.bid + market.ask) / Decimal("2")
+        spread_percent = (market.ask - market.bid) / mid
+        if spread_percent > self._limits.max_bid_ask_spread_percent:
+            return RiskDecision.reject(RiskReason.WIDE_BID_ASK_SPREAD, "bid/ask spread exceeds limit")
 
         return RiskDecision.approve()

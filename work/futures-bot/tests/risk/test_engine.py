@@ -54,6 +54,7 @@ def _limits() -> RiskLimits:
         max_position_abs=10,
         max_margin_usage=Decimal("0.50"),
         max_daily_loss=Decimal("2500"),
+        max_bid_ask_spread_percent=Decimal("0.001"),
         account_stale_after=timedelta(seconds=30),
         market_data_stale_after=timedelta(seconds=10),
         price_collar_percent=Decimal("0.05"),
@@ -165,6 +166,44 @@ def test_risk_engine_rejects_max_daily_loss_breach():
     assert decision.reason == RiskReason.MAX_DAILY_LOSS
 
 
+def test_risk_engine_rejects_market_without_two_sided_quote():
+    one_sided_market = replace(_context().market, bid=None)
+
+    decision = RiskEngine(_limits()).evaluate(_intent(), _context(market=one_sided_market))
+
+    assert decision.approved is False
+    assert decision.reason == RiskReason.MARKET_NOT_TWO_SIDED
+    assert decision.detail == "market quote is not two-sided"
+
+
+def test_risk_engine_rejects_crossed_market_quote():
+    crossed_market = replace(
+        _context().market,
+        bid=Decimal("5000.25"),
+        ask=Decimal("4999.75"),
+    )
+
+    decision = RiskEngine(_limits()).evaluate(_intent(), _context(market=crossed_market))
+
+    assert decision.approved is False
+    assert decision.reason == RiskReason.CROSSED_MARKET
+    assert decision.detail == "market bid is greater than ask"
+
+
+def test_risk_engine_rejects_wide_bid_ask_spread():
+    wide_market = replace(
+        _context().market,
+        bid=Decimal("4990.00"),
+        ask=Decimal("5010.00"),
+    )
+
+    decision = RiskEngine(_limits()).evaluate(_intent(), _context(market=wide_market))
+
+    assert decision.approved is False
+    assert decision.reason == RiskReason.WIDE_BID_ASK_SPREAD
+    assert decision.detail == "bid/ask spread exceeds limit"
+
+
 def test_risk_engine_rejects_contract_after_cutoff():
     expired = _instrument(last_safe_trade_date=date(2026, 6, 27))
 
@@ -230,6 +269,7 @@ def test_risk_limits_rejects_non_positive_max_daily_loss():
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
             max_daily_loss=Decimal("0"),
+            max_bid_ask_spread_percent=Decimal("0.001"),
             account_stale_after=timedelta(seconds=30),
             market_data_stale_after=timedelta(seconds=10),
             price_collar_percent=Decimal("0.05"),
@@ -238,3 +278,21 @@ def test_risk_limits_rejects_non_positive_max_daily_loss():
         assert str(exc) == "max_daily_loss must be positive"
     else:
         raise AssertionError("expected non-positive max_daily_loss to be rejected")
+
+
+def test_risk_limits_rejects_non_positive_max_bid_ask_spread_percent():
+    try:
+        RiskLimits(
+            max_order_quantity=5,
+            max_position_abs=10,
+            max_margin_usage=Decimal("0.50"),
+            max_daily_loss=Decimal("2500"),
+            max_bid_ask_spread_percent=Decimal("0"),
+            account_stale_after=timedelta(seconds=30),
+            market_data_stale_after=timedelta(seconds=10),
+            price_collar_percent=Decimal("0.05"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "max_bid_ask_spread_percent must be positive"
+    else:
+        raise AssertionError("expected non-positive max_bid_ask_spread_percent to be rejected")
