@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Protocol
 
@@ -17,6 +17,7 @@ from futures_bot.ports.broker import (
     BrokerConnectionError,
     BrokerSubmissionError,
 )
+from futures_bot.ports.market_data import HistoricalBar, MarketDataError
 
 
 class IbkrClientError(RuntimeError):
@@ -59,6 +60,14 @@ class IbkrClientPort(Protocol):
 
     def cancel_order(self, order_id: int) -> None:
         """Cancel an order through TWS or IB Gateway."""
+
+    def historical_daily_bars(
+        self,
+        contract: Mapping[str, object],
+        start_day: date,
+        end_day: date,
+    ) -> tuple[Mapping[str, object], ...]:
+        """Return raw IBKR historical daily bar rows."""
 
 
 @dataclass(frozen=True)
@@ -153,6 +162,29 @@ class IbkrBroker:
         except IbkrClientError as exc:
             raise BrokerCancellationError(exc.reason, exc.broker_error_code) from exc
 
+    def get_daily_bars(
+        self,
+        instrument_id: str,
+        start_day: date,
+        end_day: date,
+    ) -> tuple[HistoricalBar, ...]:
+        if not instrument_id:
+            raise ValueError("instrument_id is required")
+        if start_day > end_day:
+            raise ValueError("start_day cannot be after end_day")
+
+        try:
+            rows = self.client.historical_daily_bars(
+                contract=_contract(instrument_id),
+                start_day=start_day,
+                end_day=end_day,
+            )
+            return tuple(_historical_bar(instrument_id, row) for row in rows)
+        except IbkrClientError as exc:
+            raise MarketDataError(exc.reason, exc.broker_error_code) from exc
+        except ValueError as exc:
+            raise MarketDataError(str(exc)) from exc
+
 
 def _account_id(rows: tuple[Mapping[str, object], ...]) -> str:
     for row in rows:
@@ -241,6 +273,32 @@ def _margin_change(value: Mapping[str, object], *names: str) -> Decimal:
             return Decimal(text)
     allowed = " or ".join(names)
     raise ValueError(f"IBKR margin preview did not include {allowed}")
+
+
+def _historical_bar(instrument_id: str, row: Mapping[str, object]) -> HistoricalBar:
+    return HistoricalBar(
+        instrument_id=instrument_id,
+        day=_bar_day(_required_text(row, "date", "Date")),
+        open=Decimal(_required_text(row, "open", "Open")),
+        high=Decimal(_required_text(row, "high", "High")),
+        low=Decimal(_required_text(row, "low", "Low")),
+        close=Decimal(_required_text(row, "close", "Close")),
+        volume=_optional_int(row, "volume", "Volume"),
+    )
+
+
+def _bar_day(value: str) -> date:
+    if len(value) == 8 and value.isdigit():
+        return date(int(value[:4]), int(value[4:6]), int(value[6:8]))
+    return date.fromisoformat(value[:10])
+
+
+def _optional_int(value: Mapping[str, object], *names: str) -> int | None:
+    for name in names:
+        text = _optional_text(value, name)
+        if text is not None:
+            return int(Decimal(text))
+    return None
 
 
 def _action(side: OrderSide) -> str:

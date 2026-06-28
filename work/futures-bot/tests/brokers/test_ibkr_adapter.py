@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Mapping
 
@@ -12,6 +12,7 @@ from futures_bot.brokers.ibkr.config import BrokerEnvironment, IbkrConfig
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
 from futures_bot.ports.broker import BrokerCancellationError, BrokerConnectionError, BrokerSubmissionError
+from futures_bot.ports.market_data import HistoricalBar, MarketDataError
 
 
 NOW = datetime(2026, 6, 28, 17, 5, tzinfo=timezone.utc)
@@ -23,6 +24,7 @@ class RecordingIbkrClient:
         self.placed_orders: list[dict[str, object]] = []
         self.margin_preview_orders: list[dict[str, object]] = []
         self.canceled_order_ids: list[int] = []
+        self.historical_bar_requests: list[dict[str, object]] = []
         self.margin_preview = {
             "initMarginChange": "12000.25",
             "maintMarginChange": "9000.75",
@@ -54,6 +56,24 @@ class RecordingIbkrClient:
                 },
                 "position": "-1",
                 "average_cost": "18000.50",
+            },
+        )
+        self.historical_bar_rows: tuple[Mapping[str, object], ...] = (
+            {
+                "date": "20260913",
+                "open": "5000.00",
+                "high": "5010.00",
+                "low": "4995.00",
+                "close": "5005.00",
+                "volume": "12345",
+            },
+            {
+                "date": "20260914",
+                "open": "5005.00",
+                "high": "5020.00",
+                "low": "5000.00",
+                "close": "5015.00",
+                "volume": "23456",
             },
         )
 
@@ -100,6 +120,21 @@ class RecordingIbkrClient:
 
     def cancel_order(self, order_id: int) -> None:
         self.canceled_order_ids.append(order_id)
+
+    def historical_daily_bars(
+        self,
+        contract: Mapping[str, object],
+        start_day: date,
+        end_day: date,
+    ) -> tuple[Mapping[str, object], ...]:
+        self.historical_bar_requests.append(
+            {
+                "contract": dict(contract),
+                "start_day": start_day,
+                "end_day": end_day,
+            }
+        )
+        return self.historical_bar_rows
 
 
 def _adapter(client: RecordingIbkrClient):
@@ -329,6 +364,76 @@ def test_ibkr_adapter_maps_margin_preview_errors():
 
     assert exc_info.value.reason == "what-if margin request failed"
     assert exc_info.value.broker_error_code == "201"
+
+
+def test_ibkr_adapter_fetches_historical_daily_bars():
+    client = RecordingIbkrClient()
+    broker = _adapter(client)
+
+    bars = broker.get_daily_bars(
+        "ES-202609-CME",
+        start_day=date(2026, 9, 13),
+        end_day=date(2026, 9, 14),
+    )
+
+    assert bars == (
+        HistoricalBar(
+            instrument_id="ES-202609-CME",
+            day=date(2026, 9, 13),
+            open=Decimal("5000.00"),
+            high=Decimal("5010.00"),
+            low=Decimal("4995.00"),
+            close=Decimal("5005.00"),
+            volume=12345,
+        ),
+        HistoricalBar(
+            instrument_id="ES-202609-CME",
+            day=date(2026, 9, 14),
+            open=Decimal("5005.00"),
+            high=Decimal("5020.00"),
+            low=Decimal("5000.00"),
+            close=Decimal("5015.00"),
+            volume=23456,
+        ),
+    )
+    assert client.historical_bar_requests == [
+        {
+            "contract": {
+                "currency": "USD",
+                "exchange": "CME",
+                "lastTradeDateOrContractMonth": "202609",
+                "secType": "FUT",
+                "symbol": "ES",
+            },
+            "start_day": date(2026, 9, 13),
+            "end_day": date(2026, 9, 14),
+        }
+    ]
+
+
+def test_ibkr_adapter_maps_historical_data_errors():
+    from futures_bot.brokers.ibkr.adapter import IbkrClientError
+
+    class FailingHistoricalClient(RecordingIbkrClient):
+        def historical_daily_bars(
+            self,
+            contract: Mapping[str, object],
+            start_day: date,
+            end_day: date,
+        ) -> tuple[Mapping[str, object], ...]:
+            raise IbkrClientError("historical market data farm is disconnected", "162")
+
+    broker = _adapter(FailingHistoricalClient())
+
+    with pytest.raises(MarketDataError) as exc_info:
+        broker.get_daily_bars(
+            "ES-202609-CME",
+            start_day=date(2026, 9, 13),
+            end_day=date(2026, 9, 14),
+        )
+
+    assert exc_info.value.reason == "historical market data farm is disconnected"
+    assert exc_info.value.provider_error_code == "162"
 
 
 def test_ibkr_adapter_cancels_order_by_numeric_broker_order_id():

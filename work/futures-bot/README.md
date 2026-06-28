@@ -46,7 +46,7 @@ Common IBKR defaults:
 - TWS live: `7496`
 - IB Gateway paper/live ports depend on local gateway configuration
 
-`futures_bot.brokers.ibkr.IbkrBroker` implements the broker port around a TWS or IB Gateway client contract. It maps IBKR account summary rows, position rows, next-valid order IDs, futures contracts, order payloads, and cancel requests into the shared broker port. `futures_bot.brokers.ibkr.IbapiTwsClient` provides the concrete optional `ibapi` transport for TWS or IB Gateway callback flows.
+`futures_bot.brokers.ibkr.IbkrBroker` implements the broker port around a TWS or IB Gateway client contract. It maps IBKR account summary rows, position rows, next-valid order IDs, futures contracts, order payloads, cancel requests, what-if margin previews, and historical daily bars into shared broker and market-data ports. `futures_bot.brokers.ibkr.IbapiTwsClient` provides the concrete optional `ibapi` transport for TWS or IB Gateway callback flows, including `reqHistoricalData` daily bars.
 
 Required TradeStation environment variables:
 

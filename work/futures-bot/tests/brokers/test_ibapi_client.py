@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 import importlib
 
 import pytest
@@ -15,6 +16,15 @@ class FakeContract:
 
 class FakeOrder:
     pass
+
+
+class FakeBar:
+    date = "20260913"
+    open = 5000.0
+    high = 5010.0
+    low = 4995.0
+    close = 5005.0
+    volume = 12345
 
 
 class FakeEClient:
@@ -62,6 +72,39 @@ class FakeEClient:
 
     def cancelOrder(self, order_id: int) -> None:
         self.canceled_order_ids.append(order_id)
+
+    def reqHistoricalData(
+        self,
+        req_id: int,
+        contract: FakeContract,
+        endDateTime: str,
+        durationStr: str,
+        barSizeSetting: str,
+        whatToShow: str,
+        useRTH: int,
+        formatDate: int,
+        keepUpToDate: bool,
+        chartOptions: list[object],
+    ) -> None:
+        self.calls.append(
+            (
+                "reqHistoricalData",
+                req_id,
+                contract.symbol,
+                contract.lastTradeDateOrContractMonth,
+                contract.exchange,
+                endDateTime,
+                durationStr,
+                barSizeSetting,
+                whatToShow,
+                useRTH,
+                formatDate,
+                keepUpToDate,
+                chartOptions,
+            )
+        )
+        self.wrapper.historicalData(req_id, FakeBar())
+        self.wrapper.historicalDataEnd(req_id, "", "")
 
 
 def _modules():
@@ -214,6 +257,55 @@ def test_ibapi_tws_client_cancels_order_id():
     client.cancel_order(9001)
 
     assert client._app.canceled_order_ids == [9001]
+
+
+def test_ibapi_tws_client_collects_historical_daily_bars():
+    from futures_bot.brokers.ibkr.ibapi_client import IbapiTwsClient, create_ibapi_app
+
+    client = IbapiTwsClient(
+        app_factory=lambda: create_ibapi_app(_modules()),
+        thread_factory=ImmediateThread,
+        timeout_seconds=0.01,
+    )
+    client.connect("127.0.0.1", 7497, 101)
+
+    rows = client.historical_daily_bars(
+        contract={
+            "currency": "USD",
+            "exchange": "CME",
+            "lastTradeDateOrContractMonth": "202609",
+            "secType": "FUT",
+            "symbol": "ES",
+        },
+        start_day=date(2026, 9, 13),
+        end_day=date(2026, 9, 14),
+    )
+
+    assert rows == (
+        {
+            "date": "20260913",
+            "open": "5000.0",
+            "high": "5010.0",
+            "low": "4995.0",
+            "close": "5005.0",
+            "volume": "12345",
+        },
+    )
+    assert (
+        "reqHistoricalData",
+        1,
+        "ES",
+        "202609",
+        "CME",
+        "20260914 23:59:59 UTC",
+        "2 D",
+        "1 day",
+        "TRADES",
+        0,
+        1,
+        False,
+        [],
+    ) in client._app.calls
 
 
 def test_ibapi_tws_client_reports_missing_ibapi_dependency(monkeypatch):
