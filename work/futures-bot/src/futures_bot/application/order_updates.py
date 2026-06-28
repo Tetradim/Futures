@@ -27,6 +27,11 @@ class OrderLifecycleStorePort(Protocol):
         """Persist the latest known order lifecycle."""
 
 
+class ProcessedFillLookupPort(Protocol):
+    def contains(self, broker_execution_id: str) -> bool:
+        """Return whether a broker execution ID has already been applied."""
+
+
 class OrderUpdateService:
     def __init__(
         self,
@@ -34,11 +39,13 @@ class OrderUpdateService:
         position_ledger: PositionLedgerPort | None = None,
         order_activity: OrderActivityLookupPort | None = None,
         lifecycle_store: OrderLifecycleStorePort | None = None,
+        processed_fill_store: ProcessedFillLookupPort | None = None,
     ) -> None:
         self._audit_log = audit_log
         self._position_ledger = position_ledger
         self._order_activity = order_activity
         self._lifecycle_store = lifecycle_store
+        self._processed_fill_store = processed_fill_store
 
     def apply(
         self,
@@ -77,6 +84,19 @@ class OrderUpdateService:
             raise ValueError("order_quantity must be positive")
         if update.update_type == BrokerOrderUpdateType.FILL and resolved_order_quantity is None:
             raise ValueError("order_quantity is required for fill updates")
+        if self._is_duplicate_fill(update):
+            self._audit_log.append(
+                {
+                    "type": "order_update_fill_duplicate_ignored",
+                    "timestamp": update.timestamp.isoformat(),
+                    "account_id": update.account_id,
+                    "client_order_id": update.client_order_id,
+                    "broker_order_id": update.broker_order_id,
+                    "broker_execution_id": update.broker_execution_id,
+                    "instrument_id": update.instrument_id,
+                }
+            )
+            return lifecycle
         if (
             self._position_ledger is not None
             and update.update_type == BrokerOrderUpdateType.FILL
@@ -118,3 +138,10 @@ class OrderUpdateService:
             assert resolved_order_side is not None
             self._position_ledger.apply_fill(update, resolved_order_side)
         return updated
+
+    def _is_duplicate_fill(self, update: BrokerOrderUpdate) -> bool:
+        if self._processed_fill_store is None or update.update_type != BrokerOrderUpdateType.FILL:
+            return False
+        if update.broker_execution_id is None:
+            raise ValueError("broker_execution_id is required when processed fill store is configured")
+        return self._processed_fill_store.contains(update.broker_execution_id)

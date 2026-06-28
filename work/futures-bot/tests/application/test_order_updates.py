@@ -42,6 +42,16 @@ class RecordingLifecycleStore:
         self.saved_lifecycles.append(lifecycle)
 
 
+class StaticProcessedFillLookup:
+    def __init__(self, fill_ids: frozenset[str]) -> None:
+        self.fill_ids = fill_ids
+        self.checked_fill_ids: list[str] = []
+
+    def contains(self, broker_execution_id: str) -> bool:
+        self.checked_fill_ids.append(broker_execution_id)
+        return broker_execution_id in self.fill_ids
+
+
 def _activity_record(
     client_order_id: str = "order-1",
     instrument_id: str = "ES-202609-CME",
@@ -157,6 +167,73 @@ def test_order_update_service_applies_position_ledger_when_configured_for_fill()
     assert updated.status == OrderLifecycleStatus.PARTIALLY_FILLED
     assert position_ledger.applied_fills == [(fill_update, OrderSide.BUY)]
     assert audit_log.events[-1]["update_type"] == "fill"
+
+
+def test_order_update_service_ignores_duplicate_fill_before_lifecycle_mutation():
+    audit_log = InMemoryAuditLog()
+    position_ledger = RecordingPositionLedger()
+    processed_fills = StaticProcessedFillLookup(frozenset({"exec-1"}))
+    lifecycle_store = RecordingLifecycleStore()
+    service = OrderUpdateService(
+        audit_log,
+        position_ledger=position_ledger,
+        processed_fill_store=processed_fills,
+        lifecycle_store=lifecycle_store,
+    )
+    lifecycle = OrderLifecycle.pending_submit(client_order_id="order-1").mark_working()
+
+    updated = service.apply(
+        lifecycle=lifecycle,
+        update=_update(
+            BrokerOrderUpdateType.FILL,
+            fill_quantity=2,
+            fill_price=Decimal("5001.25"),
+            broker_execution_id="exec-1",
+        ),
+        order_quantity=5,
+        order_side=OrderSide.BUY,
+    )
+
+    assert updated == lifecycle
+    assert processed_fills.checked_fill_ids == ["exec-1"]
+    assert lifecycle_store.saved_lifecycles == []
+    assert position_ledger.applied_fills == []
+    assert audit_log.events == (
+        {
+            "type": "order_update_fill_duplicate_ignored",
+            "timestamp": "2026-06-28T14:31:00+00:00",
+            "account_id": "acct-1",
+            "client_order_id": "order-1",
+            "broker_order_id": "broker-123",
+            "broker_execution_id": "exec-1",
+            "instrument_id": "ES-202609-CME",
+        },
+    )
+
+
+def test_order_update_service_requires_execution_id_when_fill_deduplication_is_configured():
+    audit_log = InMemoryAuditLog()
+    processed_fills = StaticProcessedFillLookup(frozenset())
+    service = OrderUpdateService(audit_log, processed_fill_store=processed_fills)
+    lifecycle = OrderLifecycle.pending_submit(client_order_id="order-1").mark_working()
+
+    try:
+        service.apply(
+            lifecycle=lifecycle,
+            update=_update(
+                BrokerOrderUpdateType.FILL,
+                fill_quantity=1,
+                fill_price=Decimal("5001.25"),
+            ),
+            order_quantity=5,
+        )
+    except ValueError as exc:
+        assert str(exc) == "broker_execution_id is required when processed fill store is configured"
+    else:
+        raise AssertionError("expected missing execution ID to be rejected")
+
+    assert processed_fills.checked_fill_ids == []
+    assert audit_log.events == ()
 
 
 def test_order_update_service_recovers_order_metadata_for_restarted_fill_handler():
