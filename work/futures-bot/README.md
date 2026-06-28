@@ -74,7 +74,7 @@ $env:NINJATRADER_ACCESS_TOKEN = "..."
 $env:NINJATRADER_ACCOUNT_ID = "SIM12345"
 ```
 
-NinjaTrader REST and WebSocket URLs are explicit because deployments and broker access paths can differ. `futures_bot.brokers.ninjatrader.NinjaTraderBroker` implements the broker port with bearer-token HTTP calls against the configured REST URL. It validates the configured account, fetches account and position state, submits approved orders, and requests order cancellation through the same application-layer risk, readiness, submission, cancellation, reconciliation, and audit services used by every broker.
+NinjaTrader REST and WebSocket URLs are explicit because deployments and broker access paths can differ. `futures_bot.brokers.ninjatrader.NinjaTraderBroker` implements the broker port with bearer-token HTTP calls against the configured REST URL. It validates the configured account, fetches account and position state, submits approved orders, and requests order cancellation through the same application-layer risk, readiness, submission, cancellation, reconciliation, and audit services used by every broker. Historical daily bars fail closed with `MarketDataError` until a deployment-specific, verified NinjaTrader data route is configured.
 
 Required Optimus Futures environment variables:
 
@@ -86,7 +86,7 @@ $env:OPTIMUS_PASSWORD = "..."
 $env:OPTIMUS_ACCOUNT_ID = "SIM12345"
 ```
 
-Supported Optimus execution routes are `rithmic`, `cqg`, `tt`, `cts`, `firetip`, `gain`, `oak`, and `qst`. `futures_bot.brokers.optimus.OptimusBroker` uses `OPTIMUS_API_URL` as a controlled HTTP bridge for the selected execution provider. It sends the selected route, app name, credentials, and account ID to that bridge, then maps account, position, order, and cancel responses into the shared broker port. Use `OPTIMUS_APP_NAME` to identify the bot session to that bridge or route adapter.
+Supported Optimus execution routes are `rithmic`, `cqg`, `tt`, `cts`, `firetip`, `gain`, `oak`, and `qst`. `futures_bot.brokers.optimus.OptimusBroker` uses `OPTIMUS_API_URL` as a controlled HTTP bridge for the selected execution provider. It sends the selected route, app name, credentials, and account ID to that bridge, then maps account, position, order, and cancel responses into the shared broker port. Historical daily bars fail closed with `MarketDataError` until the controlled bridge exposes a verified route-specific historical data contract. Use `OPTIMUS_APP_NAME` to identify the bot session to that bridge or route adapter.
 
 ## Commands
 

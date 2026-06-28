@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import base64
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Mapping
 
@@ -12,6 +12,7 @@ from futures_bot.brokers.optimus.config import BrokerEnvironment, OptimusConfig,
 from futures_bot.domain.enums import OrderSide, OrderType
 from futures_bot.domain.orders import BrokerOrder
 from futures_bot.ports.broker import BrokerCancellationError, BrokerConnectionError, BrokerSubmissionError
+from futures_bot.ports.market_data import MarketDataError
 
 
 NOW = datetime(2026, 6, 28, 19, 0, tzinfo=timezone.utc)
@@ -276,6 +277,23 @@ def test_optimus_adapter_fails_closed_for_order_margin_estimates():
 
     assert exc_info.value.reason == (
         "Optimus adapter does not expose broker-provided order margin estimates"
+    )
+    assert transport.requests == []
+
+
+def test_optimus_adapter_fails_closed_for_historical_daily_bars():
+    transport = RecordingTransport(())
+    broker = _adapter(transport)
+
+    with pytest.raises(MarketDataError) as exc_info:
+        broker.get_daily_bars(
+            "ES-202609-CME",
+            start_day=date(2026, 9, 13),
+            end_day=date(2026, 9, 14),
+        )
+
+    assert exc_info.value.reason == (
+        "Optimus adapter does not expose verified historical daily bars"
     )
     assert transport.requests == []
 

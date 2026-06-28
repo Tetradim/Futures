@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Protocol
 from urllib.error import HTTPError, URLError
@@ -21,6 +21,7 @@ from futures_bot.ports.broker import (
     BrokerConnectionError,
     BrokerSubmissionError,
 )
+from futures_bot.ports.market_data import HistoricalBar, MarketDataError
 
 
 class NinjaTraderHttpError(RuntimeError):
@@ -165,6 +166,16 @@ class NinjaTraderBroker:
     def estimate_order_margin(self, order: BrokerOrder) -> MarginEstimate:
         raise MarginEstimateUnavailable(
             "NinjaTrader adapter does not expose broker-provided order margin estimates"
+        )
+
+    def get_daily_bars(
+        self,
+        instrument_id: str,
+        start_day: date,
+        end_day: date,
+    ) -> tuple[HistoricalBar, ...]:
+        raise MarketDataError(
+            "NinjaTrader adapter does not expose verified historical daily bars"
         )
 
     def cancel_order(self, broker_order_id: str) -> None:
