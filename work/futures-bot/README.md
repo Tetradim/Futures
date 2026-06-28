@@ -2,7 +2,7 @@
 
 Production-oriented futures trading bot core.
 
-This project is being built safety-first. The current slice provides tested domain models, pre-trade risk controls, pre-broker risk decision auditing, broker connection lifecycle handling, broker-facing order submission orchestration, broker configuration validation, reconciliation logic, immutable audit events, durable JSONL audit storage, and conservative operator CLI commands.
+This project is being built safety-first. The current slice provides tested domain models, pre-trade risk controls, pre-broker risk decision auditing, broker connection lifecycle handling, broker-facing order submission orchestration, broker configuration validation, reconciliation logic, immutable audit events, durable JSONL audit and order-activity storage, and conservative operator CLI commands.
 
 It does not yet submit live orders. That is intentional. Live order submission should only be added after broker connection lifecycle, order acknowledgement handling, fill handling, cancellation, reconciliation, and audit trails are implemented and tested against a real broker API.
 
@@ -144,7 +144,7 @@ Market data adapters can provide quotes through `futures_bot.ports.market_data.M
 
 Readiness-gated order entry should flow through `futures_bot.application.order_gateway.OrderGatewayService`. It refuses new orders when the latest readiness result is negative, writes an `order_submission_blocked` audit event with the readiness reason, and only then delegates ready orders into the audited submission service.
 
-Order activity can be tracked through `futures_bot.application.order_activity.OrderActivityTracker`. It records accepted broker submissions, rejects duplicate client order IDs, audits the recorded activity, and builds the `used_client_order_ids` and `recent_order_timestamps` inputs needed by pre-trade duplicate-ID and order-rate risk controls.
+Order activity can be tracked through `futures_bot.application.order_activity.OrderActivityTracker`. It records accepted broker submissions, rejects duplicate client order IDs, audits the recorded activity, and builds the `used_client_order_ids` and `recent_order_timestamps` inputs needed by pre-trade duplicate-ID and order-rate risk controls. For restart-safe live operation, back it with `futures_bot.storage.order_activity.JsonlOrderActivityStore` so accepted client order IDs are rehydrated before new order checks run.
 
 Approved order intents can be submitted through `futures_bot.application.order_submission.OrderSubmissionService`. It always runs the audited risk check first, blocks rejected orders before the broker port is called, converts approved intents into `BrokerOrder` values, submits them through the configured broker adapter, and audits blocked, submitted, and broker-rejected handoffs.
 
@@ -155,6 +155,8 @@ Open order cancels can be requested through `futures_bot.application.order_cance
 Broker adapters can publish order acknowledgements, fills, cancellations, and asynchronous rejects as `futures_bot.ports.broker.BrokerOrderUpdate` values. `futures_bot.application.order_updates.OrderUpdateService` applies those updates to `OrderLifecycle` and appends `order_update_applied` audit events with account ID, client order ID, broker order ID, instrument ID, update type, resulting status, incremental fill quantity, cumulative filled quantity, reject reason, and broker error code.
 
 Audit events can be persisted with `futures_bot.storage.audit.JsonlAuditLog`. It appends one JSON object per line, creates parent directories when needed, stores a copy of each event, and replays immutable event snapshots for diagnostics.
+
+Accepted broker order activity can be persisted with `futures_bot.storage.order_activity.JsonlOrderActivityStore`. It appends one JSON object per accepted broker handoff, creates parent directories when needed, reloads timezone-aware activity records on startup, and rejects duplicate or malformed persisted client order IDs before they enter risk inputs.
 
 ## Next Adapter Targets
 
