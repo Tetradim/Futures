@@ -15,6 +15,7 @@ class RiskLimits:
     max_order_quantity: int
     max_position_abs: int
     max_margin_usage: Decimal
+    max_maintenance_margin_usage: Decimal
     max_daily_loss: Decimal
     max_order_notional: Decimal
     max_position_notional: Decimal
@@ -32,6 +33,8 @@ class RiskLimits:
             raise ValueError("max_position_abs must be positive")
         if not Decimal("0") < self.max_margin_usage <= Decimal("1"):
             raise ValueError("max_margin_usage must be between 0 and 1")
+        if not Decimal("0") < self.max_maintenance_margin_usage <= Decimal("1"):
+            raise ValueError("max_maintenance_margin_usage must be between 0 and 1")
         if self.max_daily_loss <= 0:
             raise ValueError("max_daily_loss must be positive")
         if self.max_order_notional <= 0:
@@ -61,6 +64,7 @@ class RiskContext:
     current_position: Position
     used_client_order_ids: frozenset[str]
     estimated_order_initial_margin: Decimal
+    estimated_order_maintenance_margin: Decimal
     realized_pnl_today: Decimal
     recent_order_timestamps: tuple[datetime, ...]
     kill_switch_active: bool
@@ -69,6 +73,8 @@ class RiskContext:
     def __post_init__(self) -> None:
         if self.estimated_order_initial_margin < 0:
             raise ValueError("estimated_order_initial_margin cannot be negative")
+        if self.estimated_order_maintenance_margin < 0:
+            raise ValueError("estimated_order_maintenance_margin cannot be negative")
 
 
 @dataclass(frozen=True)
@@ -145,6 +151,15 @@ class RiskEngine:
         ) / context.account.equity
         if margin_usage > self._limits.max_margin_usage:
             return RiskDecision.reject(RiskReason.MAX_MARGIN_USAGE, "estimated margin usage exceeds limit")
+
+        maintenance_margin_usage = (
+            context.account.maintenance_margin + context.estimated_order_maintenance_margin
+        ) / context.account.equity
+        if maintenance_margin_usage > self._limits.max_maintenance_margin_usage:
+            return RiskDecision.reject(
+                RiskReason.MAX_MAINTENANCE_MARGIN_USAGE,
+                "estimated maintenance margin usage exceeds limit",
+            )
 
         if context.estimated_order_initial_margin > context.account.buying_power:
             return RiskDecision.reject(

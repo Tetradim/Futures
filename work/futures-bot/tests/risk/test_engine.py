@@ -53,6 +53,7 @@ def _limits() -> RiskLimits:
         max_order_quantity=5,
         max_position_abs=10,
         max_margin_usage=Decimal("0.50"),
+        max_maintenance_margin_usage=Decimal("0.80"),
         max_daily_loss=Decimal("2500"),
         max_order_notional=Decimal("1000000"),
         max_position_notional=Decimal("2000000"),
@@ -91,6 +92,7 @@ def _context(**overrides) -> RiskContext:
         ),
         used_client_order_ids=frozenset(),
         estimated_order_initial_margin=Decimal("5000"),
+        estimated_order_maintenance_margin=Decimal("4000"),
         realized_pnl_today=Decimal("0"),
         recent_order_timestamps=(),
         kill_switch_active=False,
@@ -216,6 +218,20 @@ def test_risk_engine_rejects_max_margin_usage_breach():
 
     assert decision.approved is False
     assert decision.reason == RiskReason.MAX_MARGIN_USAGE
+
+
+def test_risk_engine_rejects_max_maintenance_margin_usage_breach():
+    decision = RiskEngine(_limits()).evaluate(
+        _intent(),
+        _context(
+            estimated_order_initial_margin=Decimal("5000"),
+            estimated_order_maintenance_margin=Decimal("73000"),
+        ),
+    )
+
+    assert decision.approved is False
+    assert decision.reason == RiskReason.MAX_MAINTENANCE_MARGIN_USAGE
+    assert decision.detail == "estimated maintenance margin usage exceeds limit"
 
 
 def test_risk_engine_rejects_insufficient_buying_power():
@@ -376,6 +392,7 @@ def test_risk_limits_rejects_non_positive_max_daily_loss():
             max_order_quantity=5,
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
+            max_maintenance_margin_usage=Decimal("0.80"),
             max_daily_loss=Decimal("0"),
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("2000000"),
@@ -398,6 +415,7 @@ def test_risk_limits_rejects_non_positive_max_bid_ask_spread_percent():
             max_order_quantity=5,
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
+            max_maintenance_margin_usage=Decimal("0.80"),
             max_daily_loss=Decimal("2500"),
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("2000000"),
@@ -420,6 +438,7 @@ def test_risk_limits_rejects_non_positive_max_order_notional():
             max_order_quantity=5,
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
+            max_maintenance_margin_usage=Decimal("0.80"),
             max_daily_loss=Decimal("2500"),
             max_order_notional=Decimal("0"),
             max_position_notional=Decimal("2000000"),
@@ -442,6 +461,7 @@ def test_risk_limits_rejects_non_positive_max_position_notional():
             max_order_quantity=5,
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
+            max_maintenance_margin_usage=Decimal("0.80"),
             max_daily_loss=Decimal("2500"),
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("0"),
@@ -464,6 +484,7 @@ def test_risk_limits_rejects_non_positive_max_orders_per_window():
             max_order_quantity=5,
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
+            max_maintenance_margin_usage=Decimal("0.80"),
             max_daily_loss=Decimal("2500"),
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("2000000"),
@@ -486,6 +507,7 @@ def test_risk_limits_rejects_non_positive_order_rate_window():
             max_order_quantity=5,
             max_position_abs=10,
             max_margin_usage=Decimal("0.50"),
+            max_maintenance_margin_usage=Decimal("0.80"),
             max_daily_loss=Decimal("2500"),
             max_order_notional=Decimal("1000000"),
             max_position_notional=Decimal("2000000"),
@@ -500,3 +522,35 @@ def test_risk_limits_rejects_non_positive_order_rate_window():
         assert str(exc) == "order_rate_window must be positive"
     else:
         raise AssertionError("expected non-positive order_rate_window to be rejected")
+
+
+def test_risk_limits_rejects_invalid_max_maintenance_margin_usage():
+    try:
+        RiskLimits(
+            max_order_quantity=5,
+            max_position_abs=10,
+            max_margin_usage=Decimal("0.50"),
+            max_maintenance_margin_usage=Decimal("1.01"),
+            max_daily_loss=Decimal("2500"),
+            max_order_notional=Decimal("1000000"),
+            max_position_notional=Decimal("2000000"),
+            max_bid_ask_spread_percent=Decimal("0.001"),
+            max_orders_per_window=3,
+            order_rate_window=timedelta(seconds=10),
+            account_stale_after=timedelta(seconds=30),
+            market_data_stale_after=timedelta(seconds=10),
+            price_collar_percent=Decimal("0.05"),
+        )
+    except ValueError as exc:
+        assert str(exc) == "max_maintenance_margin_usage must be between 0 and 1"
+    else:
+        raise AssertionError("expected invalid max_maintenance_margin_usage to be rejected")
+
+
+def test_risk_context_rejects_negative_estimated_order_maintenance_margin():
+    try:
+        _context(estimated_order_maintenance_margin=Decimal("-1"))
+    except ValueError as exc:
+        assert str(exc) == "estimated_order_maintenance_margin cannot be negative"
+    else:
+        raise AssertionError("expected negative estimated_order_maintenance_margin to be rejected")
