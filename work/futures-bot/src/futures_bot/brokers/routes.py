@@ -8,6 +8,7 @@ from futures_bot.application.margin_estimates import MarginEstimateProviderPort
 from futures_bot.brokers.ibkr import IbkrBroker, IbkrClientPort, IbapiTwsClient, load_ibkr_config
 from futures_bot.brokers.ninjatrader import NinjaTraderBroker, load_ninjatrader_config
 from futures_bot.brokers.optimus import OptimusBroker, load_optimus_config
+from futures_bot.brokers.tastytrade import TastytradeBroker, load_tastytrade_config
 from futures_bot.brokers.tradestation import TradeStationBroker, load_tradestation_config
 from futures_bot.brokers.tradovate import TradovateBroker, load_tradovate_config
 from futures_bot.ports.broker import BrokerPort
@@ -63,6 +64,14 @@ def create_broker_route(
         )
     if broker_name == "tradovate":
         broker = TradovateBroker(load_tradovate_config(env))
+        return BrokerRoute(
+            name=broker_name,
+            execution=broker,
+            margin_estimator=broker,
+            historical_data=broker,
+        )
+    if broker_name == "tastytrade":
+        broker = TastytradeBroker(load_tastytrade_config(env))
         return BrokerRoute(
             name=broker_name,
             execution=broker,

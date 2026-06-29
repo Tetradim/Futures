@@ -66,10 +66,10 @@ def known_futures_brokers() -> tuple[FuturesBrokerCandidate, ...]:
         FuturesBrokerCandidate(
             broker_key="tastytrade",
             display_name="tastytrade",
-            status=BrokerConnectionStatus.DOCUMENTED_API,
+            status=BrokerConnectionStatus.SUPPORTED,
             api_surface="tastytrade Open API",
             source_url="https://developer.tastytrade.com/",
-            notes="Public HTTP API is documented; futures-specific order and account mapping still needs adapter implementation.",
+            notes="Native REST adapter is implemented for futures account validation, balances, positions, orders, cancellation, and margin dry-runs.",
         ),
         FuturesBrokerCandidate(
             broker_key="ironbeam_xapi",

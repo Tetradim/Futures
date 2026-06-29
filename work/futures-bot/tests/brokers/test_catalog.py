@@ -14,6 +14,7 @@ def test_catalog_includes_supported_live_capable_broker_routes():
             "ibkr",
             "ninjatrader",
             "optimus",
+            "tastytrade",
             "tradestation",
             "tradovate",
         }
@@ -30,7 +31,6 @@ def test_catalog_tracks_documented_api_backlog():
     assert documented_backlog >= {
         "ironbeam_xapi",
         "saxo_openapi",
-        "tastytrade",
         "webull_openapi",
     }
 

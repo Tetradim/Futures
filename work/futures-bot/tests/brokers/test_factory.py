@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from futures_bot.brokers.ibkr import IbkrBroker
+from futures_bot.brokers.tastytrade import TastytradeBroker
 from futures_bot.brokers.tradestation import TradeStationBroker
 from futures_bot.brokers.tradovate import TradovateBroker
 
@@ -43,6 +44,15 @@ def _tradovate_env() -> dict[str, str]:
         "TRADOVATE_ACCESS_TOKEN": "secret-token",
         "TRADOVATE_ACCOUNT_ID": "123456",
         "TRADOVATE_ACCOUNT_SPEC": "DEMO123456",
+    }
+
+
+def _tastytrade_env() -> dict[str, str]:
+    return {
+        "BROKER_ENV": "paper",
+        "TASTYTRADE_SESSION_TOKEN": "session-token",
+        "TASTYTRADE_CUSTOMER_ID": "98765",
+        "TASTYTRADE_ACCOUNT_NUMBER": "5WX12345",
     }
 
 
@@ -218,6 +228,17 @@ def test_create_broker_returns_tradovate_adapter_from_environment():
     assert broker.config.base_url == "https://demo.tradovateapi.com/v1"
     assert broker.config.account_id == 123456
     assert broker.config.account_spec == "DEMO123456"
+
+
+def test_create_broker_returns_tastytrade_adapter_from_environment():
+    from futures_bot.brokers.factory import create_broker
+
+    broker = create_broker("tastytrade", _tastytrade_env())
+
+    assert isinstance(broker, TastytradeBroker)
+    assert broker.config.base_url == "https://api.cert.tastytrade.com"
+    assert broker.config.customer_id == "98765"
+    assert broker.config.account_number == "5WX12345"
 
 
 def test_create_broker_rejects_unknown_broker():
