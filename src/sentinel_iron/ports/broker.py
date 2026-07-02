@@ -1,0 +1,102 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
+from enum import StrEnum
+from typing import Protocol
+
+from sentinel_iron.domain.orders import BrokerOrder
+from sentinel_iron.domain.portfolio import AccountSnapshot, Position
+
+
+class BrokerSubmissionError(RuntimeError):
+    def __init__(self, reason: str, broker_error_code: str | None = None) -> None:
+        if not reason:
+            raise ValueError("reason is required")
+        super().__init__(reason)
+        self.reason = reason
+        self.broker_error_code = broker_error_code
+
+
+class BrokerCancellationError(RuntimeError):
+    def __init__(self, reason: str, broker_error_code: str | None = None) -> None:
+        if not reason:
+            raise ValueError("reason is required")
+        super().__init__(reason)
+        self.reason = reason
+        self.broker_error_code = broker_error_code
+
+
+class BrokerConnectionError(RuntimeError):
+    def __init__(self, reason: str, broker_error_code: str | None = None) -> None:
+        if not reason:
+            raise ValueError("reason is required")
+        super().__init__(reason)
+        self.reason = reason
+        self.broker_error_code = broker_error_code
+
+
+class BrokerOrderUpdateType(StrEnum):
+    WORKING = "working"
+    FILL = "fill"
+    CANCELED = "canceled"
+    REJECTED = "rejected"
+
+
+@dataclass(frozen=True)
+class BrokerOrderUpdate:
+    account_id: str
+    client_order_id: str
+    broker_order_id: str | None
+    instrument_id: str
+    update_type: BrokerOrderUpdateType
+    timestamp: datetime
+    fill_quantity: int = 0
+    fill_price: Decimal | None = None
+    broker_execution_id: str | None = None
+    reject_reason: str | None = None
+    broker_error_code: str | None = None
+
+    def __post_init__(self) -> None:
+        if not self.account_id:
+            raise ValueError("account_id is required")
+        if not self.client_order_id:
+            raise ValueError("client_order_id is required")
+        if self.broker_order_id == "":
+            raise ValueError("broker_order_id cannot be empty")
+        if not self.instrument_id:
+            raise ValueError("instrument_id is required")
+        if self.fill_quantity < 0:
+            raise ValueError("fill_quantity cannot be negative")
+        if self.update_type == BrokerOrderUpdateType.FILL and self.fill_quantity <= 0:
+            raise ValueError("fill_quantity must be positive for fill updates")
+        if self.update_type != BrokerOrderUpdateType.FILL and self.fill_quantity != 0:
+            raise ValueError("fill_quantity is only valid for fill updates")
+        if self.fill_price is not None and self.fill_price <= 0:
+            raise ValueError("fill_price must be positive")
+        if self.update_type != BrokerOrderUpdateType.FILL and self.fill_price is not None:
+            raise ValueError("fill_price is only valid for fill updates")
+        if self.broker_execution_id is not None and not self.broker_execution_id:
+            raise ValueError("broker_execution_id cannot be empty")
+        if self.update_type != BrokerOrderUpdateType.FILL and self.broker_execution_id is not None:
+            raise ValueError("broker_execution_id is only valid for fill updates")
+        if self.update_type == BrokerOrderUpdateType.REJECTED and not self.reject_reason:
+            raise ValueError("reject_reason is required for rejected updates")
+
+
+class BrokerPort(Protocol):
+    def connect(self) -> None:
+        """Open the broker connection."""
+
+    def get_account(self) -> AccountSnapshot:
+        """Return a fresh broker account snapshot."""
+
+    def get_positions(self) -> tuple[Position, ...]:
+        """Return current broker positions."""
+
+    def submit_order(self, order: BrokerOrder) -> str:
+        """Submit an approved broker order and return the broker order ID."""
+
+    def cancel_order(self, broker_order_id: str) -> None:
+        """Cancel an open broker order."""

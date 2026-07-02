@@ -1,0 +1,270 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+from sentinel_iron.domain.enums import OrderSide, OrderType, RiskReason
+from sentinel_iron.domain.instruments import FuturesInstrument
+from sentinel_iron.domain.orders import OrderIntent
+from sentinel_iron.domain.portfolio import AccountSnapshot, MarketSnapshot, Position
+
+
+@dataclass(frozen=True)
+class RiskLimits:
+    max_order_quantity: int
+    max_position_abs: int
+    max_margin_usage: Decimal
+    max_maintenance_margin_usage: Decimal
+    max_daily_loss: Decimal
+    max_order_notional: Decimal
+    max_position_notional: Decimal
+    max_bid_ask_spread_percent: Decimal
+    max_orders_per_window: int
+    order_rate_window: timedelta
+    account_stale_after: timedelta
+    market_data_stale_after: timedelta
+    price_collar_percent: Decimal
+
+    def __post_init__(self) -> None:
+        if self.max_order_quantity <= 0:
+            raise ValueError("max_order_quantity must be positive")
+        if self.max_position_abs <= 0:
+            raise ValueError("max_position_abs must be positive")
+        if not Decimal("0") < self.max_margin_usage <= Decimal("1"):
+            raise ValueError("max_margin_usage must be between 0 and 1")
+        if not Decimal("0") < self.max_maintenance_margin_usage <= Decimal("1"):
+            raise ValueError("max_maintenance_margin_usage must be between 0 and 1")
+        if self.max_daily_loss <= 0:
+            raise ValueError("max_daily_loss must be positive")
+        if self.max_order_notional <= 0:
+            raise ValueError("max_order_notional must be positive")
+        if self.max_position_notional <= 0:
+            raise ValueError("max_position_notional must be positive")
+        if self.max_bid_ask_spread_percent <= 0:
+            raise ValueError("max_bid_ask_spread_percent must be positive")
+        if self.max_orders_per_window <= 0:
+            raise ValueError("max_orders_per_window must be positive")
+        if self.order_rate_window <= timedelta(0):
+            raise ValueError("order_rate_window must be positive")
+        if self.account_stale_after <= timedelta(0):
+            raise ValueError("account_stale_after must be positive")
+        if self.market_data_stale_after <= timedelta(0):
+            raise ValueError("market_data_stale_after must be positive")
+        if self.price_collar_percent <= 0:
+            raise ValueError("price_collar_percent must be positive")
+
+
+@dataclass(frozen=True)
+class RiskContext:
+    now: datetime
+    instrument: FuturesInstrument
+    account: AccountSnapshot
+    market: MarketSnapshot
+    current_position: Position
+    used_client_order_ids: frozenset[str]
+    estimated_order_initial_margin: Decimal
+    estimated_order_maintenance_margin: Decimal
+    realized_pnl_today: Decimal
+    recent_order_timestamps: tuple[datetime, ...]
+    kill_switch_active: bool
+    positions_reconciled: bool
+    working_order_intents: tuple[OrderIntent, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.estimated_order_initial_margin < 0:
+            raise ValueError("estimated_order_initial_margin cannot be negative")
+        if self.estimated_order_maintenance_margin < 0:
+            raise ValueError("estimated_order_maintenance_margin cannot be negative")
+
+
+@dataclass(frozen=True)
+class RiskDecision:
+    approved: bool
+    reason: RiskReason | None
+    detail: str
+
+    @classmethod
+    def approve(cls) -> RiskDecision:
+        return cls(approved=True, reason=None, detail="approved")
+
+    @classmethod
+    def reject(cls, reason: RiskReason, detail: str) -> RiskDecision:
+        return cls(approved=False, reason=reason, detail=detail)
+
+
+class RiskEngine:
+    def __init__(self, limits: RiskLimits) -> None:
+        self._limits = limits
+
+    def evaluate(self, intent: OrderIntent, context: RiskContext) -> RiskDecision:
+        if context.kill_switch_active:
+            return RiskDecision.reject(RiskReason.KILL_SWITCH_ACTIVE, "kill switch is active")
+
+        if not context.positions_reconciled:
+            return RiskDecision.reject(
+                RiskReason.UNRECONCILED_POSITIONS,
+                "internal positions do not reconcile with broker positions",
+            )
+
+        if context.now - context.account.timestamp > self._limits.account_stale_after:
+            return RiskDecision.reject(RiskReason.STALE_ACCOUNT, "account snapshot is stale")
+
+        if context.now - context.market.timestamp > self._limits.market_data_stale_after:
+            return RiskDecision.reject(RiskReason.STALE_MARKET_DATA, "market data is stale")
+
+        instrument_decision = self._evaluate_instrument_consistency(intent, context)
+        if not instrument_decision.approved:
+            return instrument_decision
+
+        if context.realized_pnl_today <= -self._limits.max_daily_loss:
+            return RiskDecision.reject(RiskReason.MAX_DAILY_LOSS, "realized daily loss limit reached")
+
+        recent_order_count = self._recent_order_count(context)
+        if recent_order_count >= self._limits.max_orders_per_window:
+            return RiskDecision.reject(RiskReason.ORDER_RATE_LIMIT, "order rate limit reached")
+
+        if self._has_potential_self_match(intent, context.working_order_intents):
+            return RiskDecision.reject(
+                RiskReason.POTENTIAL_SELF_MATCH,
+                "order could match against an existing working order",
+            )
+
+        quote_decision = self._evaluate_quote(context.market)
+        if not quote_decision.approved:
+            return quote_decision
+
+        if intent.quantity > self._limits.max_order_quantity:
+            return RiskDecision.reject(RiskReason.MAX_ORDER_QUANTITY, "order quantity exceeds limit")
+
+        reference_price = intent.limit_price if intent.limit_price is not None else context.market.last
+        order_notional = self._notional(intent.quantity, reference_price, context.instrument)
+        if order_notional > self._limits.max_order_notional:
+            return RiskDecision.reject(RiskReason.MAX_ORDER_NOTIONAL, "estimated order notional exceeds limit")
+
+        resulting_quantity = context.current_position.quantity_after(intent.side, intent.quantity)
+        if abs(resulting_quantity) > self._limits.max_position_abs:
+            return RiskDecision.reject(RiskReason.MAX_POSITION, "resulting position exceeds limit")
+
+        position_notional = self._notional(abs(resulting_quantity), reference_price, context.instrument)
+        if position_notional > self._limits.max_position_notional:
+            return RiskDecision.reject(
+                RiskReason.MAX_POSITION_NOTIONAL,
+                "estimated resulting position notional exceeds limit",
+            )
+
+        margin_usage = (
+            context.account.initial_margin + context.estimated_order_initial_margin
+        ) / context.account.equity
+        if margin_usage > self._limits.max_margin_usage:
+            return RiskDecision.reject(RiskReason.MAX_MARGIN_USAGE, "estimated margin usage exceeds limit")
+
+        maintenance_margin_usage = (
+            context.account.maintenance_margin + context.estimated_order_maintenance_margin
+        ) / context.account.equity
+        if maintenance_margin_usage > self._limits.max_maintenance_margin_usage:
+            return RiskDecision.reject(
+                RiskReason.MAX_MAINTENANCE_MARGIN_USAGE,
+                "estimated maintenance margin usage exceeds limit",
+            )
+
+        if context.estimated_order_initial_margin > context.account.buying_power:
+            return RiskDecision.reject(
+                RiskReason.INSUFFICIENT_BUYING_POWER,
+                "estimated initial margin exceeds buying power",
+            )
+
+        if not context.instrument.can_trade_on(context.now.date()):
+            return RiskDecision.reject(RiskReason.CONTRACT_NOT_TRADABLE, "contract is past last safe trade date")
+
+        if intent.client_order_id in context.used_client_order_ids:
+            return RiskDecision.reject(RiskReason.DUPLICATE_CLIENT_ORDER_ID, "client order ID was already used")
+
+        if intent.order_type == OrderType.LIMIT and intent.limit_price is not None:
+            rounded_limit = context.instrument.spec.round_to_tick(intent.limit_price)
+            if rounded_limit != intent.limit_price:
+                return RiskDecision.reject(
+                    RiskReason.INVALID_TICK_PRICE,
+                    "limit price is not aligned to contract tick size",
+                )
+
+            distance = abs(intent.limit_price - context.market.last) / context.market.last
+            if distance > self._limits.price_collar_percent:
+                return RiskDecision.reject(RiskReason.PRICE_COLLAR, "limit price is outside price collar")
+
+        return RiskDecision.approve()
+
+    def _notional(self, quantity: int, price: Decimal, instrument: FuturesInstrument) -> Decimal:
+        return Decimal(quantity) * price * instrument.spec.multiplier
+
+    def _evaluate_instrument_consistency(self, intent: OrderIntent, context: RiskContext) -> RiskDecision:
+        instrument_id = context.instrument.instrument_id
+        if intent.instrument_id != instrument_id:
+            return RiskDecision.reject(
+                RiskReason.INSTRUMENT_MISMATCH,
+                "order intent instrument does not match risk context instrument",
+            )
+        if context.market.instrument_id != instrument_id:
+            return RiskDecision.reject(
+                RiskReason.INSTRUMENT_MISMATCH,
+                "market snapshot instrument does not match risk context instrument",
+            )
+        if context.current_position.instrument_id != instrument_id:
+            return RiskDecision.reject(
+                RiskReason.INSTRUMENT_MISMATCH,
+                "position instrument does not match risk context instrument",
+            )
+        return RiskDecision.approve()
+
+    def _recent_order_count(self, context: RiskContext) -> int:
+        return sum(
+            1
+            for timestamp in context.recent_order_timestamps
+            if context.now - timestamp <= self._limits.order_rate_window
+        )
+
+    def _has_potential_self_match(
+        self,
+        intent: OrderIntent,
+        working_order_intents: tuple[OrderIntent, ...],
+    ) -> bool:
+        return any(
+            self._could_match(intent, working_intent)
+            for working_intent in working_order_intents
+        )
+
+    def _could_match(self, intent: OrderIntent, working_intent: OrderIntent) -> bool:
+        if intent.instrument_id != working_intent.instrument_id:
+            return False
+        if intent.side == working_intent.side:
+            return False
+        if intent.order_type == OrderType.MARKET or working_intent.order_type == OrderType.MARKET:
+            return True
+        if intent.limit_price is None or working_intent.limit_price is None:
+            return False
+
+        buy_price = (
+            intent.limit_price
+            if intent.side == OrderSide.BUY
+            else working_intent.limit_price
+        )
+        sell_price = (
+            intent.limit_price
+            if intent.side == OrderSide.SELL
+            else working_intent.limit_price
+        )
+        return buy_price >= sell_price
+
+    def _evaluate_quote(self, market: MarketSnapshot) -> RiskDecision:
+        if market.bid is None or market.ask is None:
+            return RiskDecision.reject(RiskReason.MARKET_NOT_TWO_SIDED, "market quote is not two-sided")
+
+        if market.bid > market.ask:
+            return RiskDecision.reject(RiskReason.CROSSED_MARKET, "market bid is greater than ask")
+
+        mid = (market.bid + market.ask) / Decimal("2")
+        spread_percent = (market.ask - market.bid) / mid
+        if spread_percent > self._limits.max_bid_ask_spread_percent:
+            return RiskDecision.reject(RiskReason.WIDE_BID_ASK_SPREAD, "bid/ask spread exceeds limit")
+
+        return RiskDecision.approve()
